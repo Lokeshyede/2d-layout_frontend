@@ -56,11 +56,12 @@ export class CADTo3DConverter {
     debugGroup.name = 'RackWallAttachmentDebugGroup';
 
     // 2. Extract walls and construct polygon for irregular rooms
-    const walls = entities.filter((e): e is WallEntity => e.type === 'wall');
+    const safeEntities = Array.isArray(entities) ? entities : [];
+    const walls = safeEntities.filter((e): e is WallEntity => e.type === 'wall');
     const roomPolygon = buildRoomPolygon(walls);
 
     const context: Entity3DContext = {
-      entities,
+      entities: safeEntities,
       walls,
       roomPolygon,
       wallHeight: WALL_HEIGHT_INCHES,
@@ -74,7 +75,7 @@ export class CADTo3DConverter {
     let convertedCount = 0;
     let failedCount = 0;
 
-    for (const ent of entities) {
+    for (const ent of safeEntities) {
       let obj: THREE.Object3D | null = null;
 
       try {

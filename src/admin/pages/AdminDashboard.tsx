@@ -22,6 +22,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onOpenLay
   const [stats, setStats] = useState<any>(null);
   const [surveys, setSurveys] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStoreType, setSelectedStoreType] = useState('All');
   const [selectedStatus, setSelectedStatus] = useState('All');
@@ -33,6 +34,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onOpenLay
 
   const fetchDashboardData = async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const statsRes = await api.getAdminDashboard(token);
       setStats(statsRes);
@@ -48,6 +50,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onOpenLay
       setSurveys(surveysRes.items || []);
     } catch (err: any) {
       console.error('Failed to fetch admin data:', err);
+      setFetchError(err.message || 'Unable to connect to backend server');
       if (err.message === 'Unauthorized' || err.message?.includes('401') || err.status === 401) {
         onLogout?.();
       }
@@ -208,14 +211,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onOpenLay
                     Loading surveys...
                   </td>
                 </tr>
-              ) : surveys.length === 0 ? (
+              ) : fetchError ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-10 text-red-500">
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="font-semibold text-xs">Failed to load surveys from server:</span>
+                      <span className="text-xs text-slate-500 font-mono">{fetchError}</span>
+                      <button
+                        onClick={fetchDashboardData}
+                        className="mt-1 px-3 py-1 bg-retailfix-red-600 hover:bg-retailfix-red-700 text-white rounded text-xs font-semibold"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (surveys || []).length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center py-10 text-slate-400">
                     No surveys found matching your query.
                   </td>
                 </tr>
               ) : (
-                surveys.map((s) => (
+                (surveys || []).map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50 transition-colors">
                     <td className="py-3 px-4 font-mono font-bold text-retailfix-red-600">
                       {s.surveyId}

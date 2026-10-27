@@ -650,7 +650,7 @@ export const ProductModelsPage: React.FC<ProductModelsPageProps> = ({ token }) =
             <Loader2 className="w-8 h-8 text-retailfix-red-600 animate-spin mb-2" />
             <p className="text-sm">Loading rack product catalog...</p>
           </div>
-        ) : products.length === 0 ? (
+        ) : (products || []).length === 0 ? (
           <div className="flex flex-col items-center justify-center p-12 text-center">
             <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
               <Box className="w-8 h-8" />

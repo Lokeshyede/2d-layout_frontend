@@ -13,7 +13,7 @@ interface Customer2DViewerProps {
 }
 
 export const Customer2DViewer: React.FC<Customer2DViewerProps> = ({
-  entities,
+  entities = [],
   storeName = 'Retail Store',
   projectTitle = 'Store Layout',
   allowPngDownload = true,
@@ -31,8 +31,9 @@ export const Customer2DViewer: React.FC<Customer2DViewerProps> = ({
   // Compute store bounding box from actual saved entities
   const computeStoreBounds = useCallback((): BoundingBox2D => {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const safeEntities = Array.isArray(entities) ? entities : [];
 
-    for (const ent of entities) {
+    for (const ent of safeEntities) {
       if (ent.type === 'wall' && (ent as any).geometry) {
         const g = (ent as any).geometry;
         minX = Math.min(minX, g.x1, g.x2);
@@ -69,10 +70,11 @@ export const Customer2DViewer: React.FC<Customer2DViewerProps> = ({
     const canvas = canvasRef.current;
     if (!canvas || !rendererRef.current) return;
 
-    const dimensions = dimManagerRef.current.generateDimensions(entities);
+    const safeEntities = Array.isArray(entities) ? entities : [];
+    const dimensions = dimManagerRef.current.generateDimensions(safeEntities);
 
     rendererRef.current.render({
-      entities,
+      entities: safeEntities,
       dimensions,
       activeTool: 'select',
       showGrid: true,

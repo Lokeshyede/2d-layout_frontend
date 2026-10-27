@@ -36,13 +36,16 @@ export const CustomRackModal: React.FC<CustomRackModalProps> = ({
   isOpen,
   onClose,
   onAddRack,
-  walls,
+  walls = [],
   initialProduct,
   availableProducts = [],
 }) => {
+  const safeWalls = Array.isArray(walls) ? walls : [];
+  const safeAvailableProducts = Array.isArray(availableProducts) ? availableProducts : [];
+
   // Selected product model (standard or admin-uploaded)
   const [selectedProduct, setSelectedProduct] = useState<Product3DModelData | null>(
-    initialProduct || (availableProducts.length > 0 ? availableProducts[0] : null)
+    initialProduct || (safeAvailableProducts.length > 0 ? safeAvailableProducts[0] : null)
   );
 
   // Dimension inputs (exact integers, no decimals)
@@ -61,7 +64,7 @@ export const CustomRackModal: React.FC<CustomRackModalProps> = ({
   const [shelfSpacing, setShelfSpacing] = useState<string>('Auto');
 
   const [placementType, setPlacementType] = useState<'wall' | 'center'>(
-    walls.length > 0 ? 'wall' : 'center'
+    safeWalls.length > 0 ? 'wall' : 'center'
   );
   const [targetWallId, setTargetWallId] = useState<string>('');
 
@@ -84,7 +87,7 @@ export const CustomRackModal: React.FC<CustomRackModalProps> = ({
       const isWall =
         product.productType?.toLowerCase().includes('wall') ||
         product.productName?.toLowerCase().includes('wall');
-      setPlacementType(isWall && walls.length > 0 ? 'wall' : 'center');
+      setPlacementType(isWall && safeWalls.length > 0 ? 'wall' : 'center');
     } else {
       setWidthFt(3);
       setWidthIn(6);
@@ -95,15 +98,15 @@ export const CustomRackModal: React.FC<CustomRackModalProps> = ({
       setShelves(6);
       setShelfThickness(1.0);
       setShelfSpacing('Auto');
-      setPlacementType(walls.length > 0 ? 'wall' : 'center');
+      setPlacementType(safeWalls.length > 0 ? 'wall' : 'center');
     }
   };
 
   useEffect(() => {
     if (initialProduct) {
       handleSelectProduct(initialProduct);
-    } else if (availableProducts.length > 0 && !selectedProduct) {
-      handleSelectProduct(availableProducts[0]);
+    } else if (safeAvailableProducts.length > 0 && !selectedProduct) {
+      handleSelectProduct(safeAvailableProducts[0]);
     }
   }, [initialProduct, availableProducts]);
 
@@ -414,7 +417,7 @@ export const CustomRackModal: React.FC<CustomRackModalProps> = ({
           </div>
 
           {/* Placement Options */}
-          {walls.length > 0 && (
+          {safeWalls.length > 0 && (
             <div className="pt-2 border-t border-slate-800">
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                 Placement Type:
@@ -444,7 +447,7 @@ export const CustomRackModal: React.FC<CustomRackModalProps> = ({
                 </button>
               </div>
 
-              {placementType === 'wall' && walls.length > 1 && (
+              {placementType === 'wall' && safeWalls.length > 1 && (
                 <div className="mt-2.5">
                   <label className="block text-[11px] text-slate-400 mb-1">Target Wall:</label>
                   <select

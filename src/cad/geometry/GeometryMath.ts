@@ -127,8 +127,9 @@ export function snapAngleOrtho(p1: Point2D, p2: Point2D): Point2D {
 export function buildRoomPolygon(
   walls: { geometry: { x1: number; y1: number; x2: number; y2: number } }[]
 ): Point2D[] {
+  if (!Array.isArray(walls) || walls.length === 0) return [];
   const validWalls = walls.filter((w) => {
-    return Math.hypot(w.geometry.x2 - w.geometry.x1, w.geometry.y2 - w.geometry.y1) >= 1;
+    return w?.geometry && Math.hypot(w.geometry.x2 - w.geometry.x1, w.geometry.y2 - w.geometry.y1) >= 1;
   });
 
   if (validWalls.length === 0) return [];

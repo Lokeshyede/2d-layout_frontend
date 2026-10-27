@@ -1,49 +1,67 @@
+export const DEFAULT_PRODUCTION_API_URL = 'https://twod-layout-backend.onrender.com';
+export const DEFAULT_DEV_API_URL = 'http://localhost:8001';
+
 /**
- * Resolves the backend origin from VITE_API_URL or dynamic current hostname.
- * Automatically adapts between localhost and LAN IPs (e.g. mobile testing on Wi-Fi),
- * preventing connection timeouts when the host Wi-Fi IP changes.
+ * Resolves the backend origin from VITE_API_URL or environment mode.
+ * - In production: Uses VITE_API_URL (expected: https://twod-layout-backend.onrender.com)
+ * - In local dev (localhost / 127.0.0.1 / private LAN IP): connects to local port 8001.
+ * - NEVER uses the frontend hostname (e.g. *.vercel.app) as the API hostname.
  */
 export const getBackendOrigin = (): string => {
   const envUrl = (import.meta as any).env?.VITE_API_URL;
+  const isDev = Boolean((import.meta as any).env?.DEV);
   const isBrowser = typeof window !== 'undefined' && Boolean(window.location?.hostname);
   const browserHost = isBrowser ? window.location.hostname : '127.0.0.1';
   const isBrowserLocal = browserHost === 'localhost' || browserHost === '127.0.0.1';
+  const isBrowserLan = /^192\.168\.\d+\.\d+$|^10\.\d+\.\d+\.\d+$|^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+$/.test(browserHost);
 
   if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
     const trimmed = envUrl.trim().replace(/\/api\/?$/, '').replace(/\/$/, '');
-    // Check if configured URL points to localhost or a private LAN IP (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
     const isEnvLocalOrLan = /https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)/i.test(trimmed);
 
-    if (isEnvLocalOrLan && isBrowser) {
-      // 1. If currently browsing on localhost/127.0.0.1, always connect to local backend (prevents stale LAN IP timeouts)
-      if (isBrowserLocal) {
-        return `http://${browserHost}:8001`;
-      }
-      // 2. If browsing from another device via LAN IP, use the device's accessed hostname
+    // If configured URL is a local/LAN IP but we are running in an external browser (e.g. on Vercel),
+    // NEVER use the local IP or frontend hostname. Fall back safely to production Render backend.
+    if (isEnvLocalOrLan && isBrowser && !isBrowserLocal && !isBrowserLan && !isDev) {
+      return DEFAULT_PRODUCTION_API_URL;
+    }
+
+    // If browsing locally from localhost or mobile on the same LAN:
+    if (isEnvLocalOrLan && isBrowser && (isBrowserLocal || isBrowserLan)) {
       return `http://${browserHost}:8001`;
     }
 
-    // External/production domain
     return trimmed;
   }
 
-  // Fallback to active browser host on port 8001
-  return `http://${browserHost}:8001`;
+  // Fallback when no env var is present:
+  if (isDev || isBrowserLocal || isBrowserLan) {
+    return `http://${browserHost}:8001`;
+  }
+
+  // Deployed on Vercel or any public domain without env var
+  return DEFAULT_PRODUCTION_API_URL;
 };
 
 export const API_BASE = `${getBackendOrigin()}/api`;
 
 /**
  * Resolves an asset / upload / model path or URL to an absolute reachable backend URL.
- * Also rewrites any stale localhost:8000 / localhost:8001 URLs to the active backend origin.
+ * Also rewrites any stale localhost:8000 / localhost:8001 or port 8000/8001 URLs to the active backend origin.
  */
 export const resolveBackendUrl = (pathOrUrl: string): string => {
   if (!pathOrUrl) return '';
   const backendOrigin = getBackendOrigin();
   if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
-    // If it points to localhost, 127.0.0.1, or any LAN IP on port 8000/8001, rewrite to active backendOrigin
-    if (/https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+):(8000|8001)/.test(pathOrUrl)) {
-      return pathOrUrl.replace(/https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+):(8000|8001)/, backendOrigin);
+    // If it points to any hostname on port 8000 or 8001 (e.g. from local tests or old mixed content URLs), rewrite to backendOrigin
+    if (/https?:\/\/[^/]+:(8000|8001)/i.test(pathOrUrl)) {
+      return pathOrUrl.replace(/https?:\/\/[^/]+:(8000|8001)/i, backendOrigin);
+    }
+    // If running over HTTPS on Vercel and the asset points to HTTP on Render, upgrade to HTTPS
+    if (backendOrigin.startsWith('https://') && pathOrUrl.startsWith('http://')) {
+      const parsed = new URL(pathOrUrl);
+      if (parsed.hostname.includes('onrender.com') || parsed.hostname.includes('vercel.app')) {
+        return pathOrUrl.replace(/^http:\/\//i, 'https://');
+      }
     }
     return pathOrUrl;
   }
@@ -170,7 +188,12 @@ export const api = {
     if (!res.ok) {
       throw new Error('Project layout not found');
     }
-    return res.json();
+    const data = await res.json();
+    return {
+      ...data,
+      entities: Array.isArray(data?.entities) ? data.entities : [],
+      versions: Array.isArray(data?.versions) ? data.versions : [],
+    };
   },
 
   async saveProject(projectId: string, payload: any, token?: string): Promise<ProjectDataResponse> {
@@ -227,7 +250,12 @@ export const api = {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new Error('Failed to fetch surveys');
-    return res.json();
+    const data = await res.json();
+    return {
+      ...data,
+      items: Array.isArray(data?.items) ? data.items : [],
+      total: data?.total ?? 0,
+    };
   },
 
   async deleteSurvey(token: string, surveyId: string) {
@@ -396,7 +424,20 @@ export const api = {
     const data = await res.json();
     return {
       ...data,
-      products: (data.products || []).map(normalizeProductModel),
+      entities: Array.isArray(data?.entities) ? data.entities : [],
+      summary: data?.summary || {
+        totalRacks: 0,
+        wallRacks: 0,
+        centerRacks: 0,
+        endcaps: 0,
+        cornerRacks: 0,
+        columns: 0,
+        doors: 0,
+        windows: 0,
+        roomSize: null,
+      },
+      rackBreakdown: Array.isArray(data?.rackBreakdown) ? data.rackBreakdown : [],
+      products: (Array.isArray(data?.products) ? data.products : []).map(normalizeProductModel),
     };
   },
 
