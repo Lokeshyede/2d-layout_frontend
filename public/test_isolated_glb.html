@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Isolated GLB Diagnostic Viewer</title>
+  <style>
+    body { margin: 0; background: #0b0f19; color: #fff; font-family: monospace; overflow: hidden; }
+    #info { position: absolute; top: 10px; left: 10px; z-index: 100; background: rgba(0,0,0,0.85); padding: 12px 16px; border-radius: 8px; border: 1px solid #334155; max-width: 480px; }
+    #views { position: absolute; top: 10px; right: 10px; z-index: 100; display: flex; flex-direction: column; gap: 6px; }
+    button { background: #1e293b; color: #38bdf8; border: 1px solid #0284c7; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    button:hover { background: #0284c7; color: #fff; }
+    button.active { background: #2563eb; color: #fff; }
+    #canvas-container { width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <h3 style="margin: 0 0 8px 0; color: #38bdf8;">PHASE 11: ISOLATED GLB VIEWER</h3>
+    <div id="status">Loading GLB directly with GLTFLoader...</div>
+    <div id="stats" style="margin-top: 8px; font-size: 11px; line-height: 1.4; color: #94a3b8;"></div>
+    <div style="margin-top: 10px; display: flex; gap: 8px;">
+      <button id="toggle-aux" style="font-size: 11px;">Toggle Aux Room Shells</button>
+      <button id="fit-rack" style="font-size: 11px;">Focus on Rack</button>
+      <button id="fit-all" style="font-size: 11px;">Focus on All</button>
+    </div>
+  </div>
+
+  <div id="views">
+    <button onclick="setView('iso')">Isometric</button>
+    <button onclick="setView('front')">Front</button>
+    <button onclick="setView('back')">Back</button>
+    <button onclick="setView('left')">Left</button>
+    <button onclick="setView('right')">Right</button>
+    <button onclick="setView('top')">Top</button>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f172a);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.05, 5000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // Neutral studio lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    dirLight.position.set(50, 100, 50);
+    scene.add(dirLight);
+    const backLight = new THREE.DirectionalLight(0x93c5fd, 0.8);
+    backLight.position.set(-50, 50, -50);
+    scene.add(backLight);
+
+    const grid = new THREE.GridHelper(50, 50, 0x3b82f6, 0x334155);
+    scene.add(grid);
+
+    let loadedModel = null;
+    let rackBox = new THREE.Box3();
+    let entireBox = new THREE.Box3();
+    let auxMeshes = [];
+    let rackMeshes = [];
+    let showAux = true;
+
+    const loader = new GLTFLoader();
+    const url = 'http://localhost:8000/uploads/models/RACKS_a9a323ad.glb';
+
+    loader.load(url, (gltf) => {
+      loadedModel = gltf.scene;
+      scene.add(loadedModel);
+      loadedModel.updateMatrixWorld(true);
+
+      entireBox.setFromObject(loadedModel);
+
+      loadedModel.traverse((child) => {
+        if (child.isMesh) {
+          const b = new THREE.Box3().setFromObject(child);
+          const sz = new THREE.Vector3();
+          b.getSize(sz);
+          const maxDim = Math.max(sz.x, sz.y, sz.z);
+          if (maxDim > 5.0) {
+            auxMeshes.push(child);
+          } else {
+            rackMeshes.push(child);
+            rackBox.union(b);
+          }
+        }
+      });
+
+      const rSize = new THREE.Vector3();
+      rackBox.getSize(rSize);
+      const eSize = new THREE.Vector3();
+      entireBox.getSize(eSize);
+
+      document.getElementById('status').innerHTML = '<span style="color: #22c55e;">GLB Loaded Successfully via direct GLTFLoader</span>';
+      document.getElementById('stats').innerHTML = `
+        Total Meshes: ${auxMeshes.length + rackMeshes.length}<br>
+        Rack Meshes: ${rackMeshes.length} (Shelves, Posts, Brackets)<br>
+        Aux Shell Meshes: ${auxMeshes.length} (28m Building Walls/Floors)<br>
+        Rack Raw Bounds: [${rSize.x.toFixed(3)}m, ${rSize.y.toFixed(3)}m, ${rSize.z.toFixed(3)}m]<br>
+        Rack Inches: [${(rSize.x*39.37).toFixed(1)}", ${(rSize.y*39.37).toFixed(1)}", ${(rSize.z*39.37).toFixed(1)}"]<br>
+        Entire Raw Bounds: [${eSize.x.toFixed(1)}m, ${eSize.y.toFixed(1)}m, ${eSize.z.toFixed(1)}m]
+      `;
+
+      // Start by focusing on the rack
+      focusOnBox(rackBox);
+    }, (progress) => {
+      const pct = progress.total ? Math.round((progress.loaded / progress.total) * 100) : 0;
+      document.getElementById('status').innerText = `Loading: ${pct}%`;
+    }, (error) => {
+      document.getElementById('status').innerHTML = `<span style="color: #ef4444;">Failed to load GLB: ${error.message}</span>`;
+    });
+
+    function focusOnBox(box) {
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z, 1.0);
+      const fov = camera.fov * (Math.PI / 180);
+      let cameraDist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
+
+      controls.target.copy(center);
+      camera.position.set(center.x + cameraDist * 0.7, center.y + cameraDist * 0.4, center.z + cameraDist * 0.9);
+      camera.near = cameraDist / 100;
+      camera.far = cameraDist * 100;
+      camera.updateProjectionMatrix();
+      controls.update();
+    }
+
+    window.setView = function(mode) {
+      const targetBox = showAux ? rackBox : rackBox;
+      const center = new THREE.Vector3();
+      targetBox.getCenter(center);
+      const size = new THREE.Vector3();
+      targetBox.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z, 1.0);
+      const fov = camera.fov * (Math.PI / 180);
+      let dist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
+
+      controls.target.copy(center);
+      if (mode === 'front') camera.position.set(center.x, center.y, center.z + dist);
+      else if (mode === 'back') camera.position.set(center.x, center.y, center.z - dist);
+      else if (mode === 'left') camera.position.set(center.x - dist, center.y, center.z);
+      else if (mode === 'right') camera.position.set(center.x + dist, center.y, center.z);
+      else if (mode === 'top') camera.position.set(center.x, center.y + dist, center.z + 0.001);
+      else camera.position.set(center.x + dist * 0.7, center.y + dist * 0.4, center.z + dist * 0.9);
+
+      camera.updateProjectionMatrix();
+      controls.update();
+    };
+
+    document.getElementById('toggle-aux').onclick = () => {
+      showAux = !showAux;
+      auxMeshes.forEach(m => m.visible = showAux);
+    };
+
+    document.getElementById('fit-rack').onclick = () => focusOnBox(rackBox);
+    document.getElementById('fit-all').onclick = () => focusOnBox(entireBox);
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
