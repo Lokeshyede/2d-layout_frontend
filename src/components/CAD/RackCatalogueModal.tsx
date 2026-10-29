@@ -78,6 +78,7 @@ export const RackCatalogueModal: React.FC<RackCatalogueModalProps> = ({
 
   return (
     <div
+      id="rack-catalogue-modal"
       role="dialog"
       aria-modal="true"
       aria-labelledby="rack-catalogue-title"
@@ -87,9 +88,12 @@ export const RackCatalogueModal: React.FC<RackCatalogueModalProps> = ({
       }}
     >
       <div
-        className="w-full max-h-[90vh] md:max-h-[85vh] md:max-w-xl bg-slate-900 border-t md:border border-slate-700 rounded-t-3xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200"
+        className="w-full max-h-[88dvh] md:max-h-[85vh] md:max-w-xl bg-slate-900 border-t md:border border-slate-700 rounded-t-3xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Mobile Sheet Grab Handle */}
+        <div className="w-12 h-1 bg-slate-700/80 rounded-full mx-auto my-1.5 md:hidden shrink-0" />
+
         {/* Header */}
         <div className="px-4 py-3.5 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
@@ -109,6 +113,7 @@ export const RackCatalogueModal: React.FC<RackCatalogueModalProps> = ({
             </div>
           </div>
           <button
+            id="btn-close-rack-catalogue"
             onClick={onClose}
             aria-label="Close rack catalogue"
             className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 active:bg-slate-700 transition-colors"
@@ -249,6 +254,7 @@ export const RackCatalogueModal: React.FC<RackCatalogueModalProps> = ({
                   {/* Action Buttons */}
                   <div className="flex items-center gap-2 pt-0.5">
                     <button
+                      id={`btn-select-rack-${prod.productId || prod.id}`}
                       onClick={() => onSelectRack(prod)}
                       className="flex-1 py-2.5 px-3 bg-retailfix-red-600 hover:bg-retailfix-red-500 active:bg-retailfix-red-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-red-950/50 touch-manipulation transition-all active:scale-[0.98]"
                     >

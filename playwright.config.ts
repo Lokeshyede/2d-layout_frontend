@@ -6,13 +6,13 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   webServer: {
-    command: 'npm run preview -- --port 4173',
-    url: 'http://localhost:4173',
+    command: 'npm run preview -- --port 4173 --host 127.0.0.1',
+    url: 'http://127.0.0.1:4173',
     reuseExistingServer: true,
     timeout: 15000,
   },
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: 'http://127.0.0.1:4173',
     trace: 'off',
   },
 });

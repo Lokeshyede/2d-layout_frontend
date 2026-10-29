@@ -773,7 +773,7 @@ export const Store3DViewer: React.FC<Store3DViewerProps> = ({
   }, [entities]);
 
   return (
-    <div className="relative w-full h-full bg-slate-950 flex flex-col select-none overflow-hidden font-sans">
+    <div id="store-3d-viewer-container" className="relative w-full h-full bg-slate-950 flex flex-col select-none overflow-hidden font-sans">
       {/* 3D Canvas Body — renders first so overlays stack above */}
       <div ref={containerRef} className="absolute inset-0 cursor-default z-0" />
 

@@ -78,6 +78,7 @@ import {
   X,
   RotateCcw,
   Check,
+  ArrowLeft,
 } from 'lucide-react';
 
 const EMPTY_ROOM_POLYGON: Point2D[] = [];
@@ -228,8 +229,17 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     pendingRackPlacementRef.current = pendingRackPlacement;
   }, [pendingRackPlacement]);
 
+  const [showExitConfirmDialog, setShowExitConfirmDialog] = useState(false);
+  const cursorWorldPosRef = useRef<Point2D>({ x: 0, y: 0 });
+  useEffect(() => {
+    cursorWorldPosRef.current = cursorWorldPos;
+  }, [cursorWorldPos]);
+
   const lastTouchTimeRef = useRef<number>(0);
+  const lastPlacementTimeRef = useRef<number>(0);
   const touchStartPosRef = useRef<Point2D>({ x: 0, y: 0 });
+  const touchStartTimeRef = useRef<number>(0);
+  const touchMovedTotalRef = useRef<number>(0);
 
   // 3D View State
   const [viewMode, setViewMode] = useState<'2D' | '3D'>('2D');
@@ -693,109 +703,6 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     return { x, y, rotation, attachedWallId, wallSide, inwardNormal, cornerPosition, isSnapped, snapType };
   }, [activeRoomPolygon]);
 
-  const commitNewRackPlacement = useCallback((
-    placement: ReturnType<typeof calculateRackPlacement>,
-    template: NonNullable<typeof pendingRackPlacement>
-  ) => {
-    const matchedProduct = ProductModelRegistry.resolve(template.productModelId, template.rackType);
-    const resolvedShelfCount = template.shelfCount || matchedProduct?.shelfCount || 6;
-    const resolvedShelfThickness = template.shelfThickness || (matchedProduct as any)?.shelfThickness || 1.0;
-
-    const newRack: RackEntity = {
-      id: `rack_${Date.now()}`,
-      type: 'rack',
-      geometry: {
-        x: placement.x,
-        y: placement.y,
-        width: template.width,
-        depth: template.depth,
-        height: template.height,
-        rotation: placement.rotation,
-      },
-      properties: {
-        rackType: template.rackType,
-        productModelId: template.productModelId,
-        productName: template.productName || matchedProduct?.productName,
-        sku: template.sku || matchedProduct?.sku,
-        shelves: resolvedShelfCount,
-        shelfCount: resolvedShelfCount,
-        shelfSpacing: template.shelfSpacing || 'auto',
-        shelfThickness: resolvedShelfThickness,
-        attachedWallId: placement.attachedWallId,
-        wallSide: placement.wallSide,
-        inwardNormal: placement.inwardNormal,
-        cornerPosition: placement.cornerPosition,
-        isCustom: template.isCustom,
-        baseWidth: template.baseWidth,
-        baseDepth: template.baseDepth,
-        baseHeight: template.baseHeight,
-        scalingMode: template.scalingMode,
-      },
-    };
-
-    updateEntitiesWithHistory([...entitiesRef.current, newRack], 'Add ' + (newRack.properties.productName || newRack.properties.rackType));
-    setSelectedEntityId(newRack.id);
-    setPendingRackPlacement(null);
-    setActiveTool('select');
-  }, [updateEntitiesWithHistory, calculateRackPlacement]);
-
-  const handleSelectRackForPlacement = useCallback((prod: Product3DModelData) => {
-    const template = {
-      rackType: prod.productType || 'Wall Rack',
-      productModelId: prod.productId,
-      productName: prod.productName,
-      sku: prod.sku,
-      width: prod.width,
-      depth: prod.depth,
-      height: prod.height,
-      shelves: prod.shelfCount || 6,
-      shelfCount: prod.shelfCount || 6,
-      shelfThickness: (prod as any)?.shelfThickness || 1.0,
-      shelfSpacing: 'auto' as const,
-      rotation: 0,
-    };
-    setPendingRackPlacement(template);
-    setActiveTool('rack');
-    setShowRackMenu(false);
-    setShowMobileProps(false);
-    setTabletInspectorOpen(false);
-
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const rect = canvas.getBoundingClientRect();
-      const centerWorld = viewportRef.current.screenToWorld({ x: rect.width / 2, y: rect.height / 2 });
-      setCursorWorldPos(centerWorld);
-    }
-  }, []);
-
-  const handleRotatePendingRack = useCallback(() => {
-    setPendingRackPlacement((prev) => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        rotation: (prev.rotation + 90) % 360,
-      };
-    });
-  }, []);
-
-  const handleCancelRackPlacement = useCallback(() => {
-    setPendingRackPlacement(null);
-    setActiveTool('select');
-  }, []);
-
-  const handleQuickPlaceCenter = useCallback(() => {
-    const template = pendingRackPlacementRef.current;
-    if (!template) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const screenCenter = { x: rect.width / 2, y: rect.height / 2 };
-    const worldCenter = viewportRef.current.screenToWorld(screenCenter);
-    const placement = calculateRackPlacement(worldCenter, template);
-    commitNewRackPlacement(placement, template);
-  }, [calculateRackPlacement, commitNewRackPlacement]);
-
-
   // Default parameters
   const [wallThickness] = useState(9); // 9 inches
   const [doorWidth] = useState(36); // 3'-0"
@@ -917,6 +824,111 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     historyRef.current.pushState(newEntities, actionDesc);
     triggerAutoSave(newEntities);
   }, [triggerAutoSave]);
+
+  const commitNewRackPlacement = useCallback((
+    placement: ReturnType<typeof calculateRackPlacement>,
+    template: NonNullable<typeof pendingRackPlacement>
+  ) => {
+    const matchedProduct = ProductModelRegistry.resolve(template.productModelId, template.rackType);
+    const resolvedShelfCount = template.shelfCount || matchedProduct?.shelfCount || 6;
+    const resolvedShelfThickness = template.shelfThickness || (matchedProduct as any)?.shelfThickness || 1.0;
+
+    const newRack: RackEntity = {
+      id: `rack_${Date.now()}`,
+      type: 'rack',
+      geometry: {
+        x: placement.x,
+        y: placement.y,
+        width: template.width,
+        depth: template.depth,
+        height: template.height,
+        rotation: placement.rotation,
+      },
+      properties: {
+        rackType: template.rackType,
+        productModelId: template.productModelId,
+        productName: template.productName || matchedProduct?.productName,
+        sku: template.sku || matchedProduct?.sku,
+        shelves: resolvedShelfCount,
+        shelfCount: resolvedShelfCount,
+        shelfSpacing: template.shelfSpacing || 'auto',
+        shelfThickness: resolvedShelfThickness,
+        attachedWallId: placement.attachedWallId,
+        wallSide: placement.wallSide,
+        inwardNormal: placement.inwardNormal,
+        cornerPosition: placement.cornerPosition,
+        isCustom: template.isCustom,
+        baseWidth: template.baseWidth,
+        baseDepth: template.baseDepth,
+        baseHeight: template.baseHeight,
+        scalingMode: template.scalingMode,
+      },
+    };
+
+    updateEntitiesWithHistory([...entitiesRef.current, newRack], 'Add ' + (newRack.properties.productName || newRack.properties.rackType));
+    setSelectedEntityId(newRack.id);
+    setShowMobileProps(false);
+    setTabletInspectorOpen(false);
+    lastPlacementTimeRef.current = Date.now();
+    setPendingRackPlacement(null);
+    setActiveTool('select');
+  }, [updateEntitiesWithHistory, calculateRackPlacement]);
+
+  const handleSelectRackForPlacement = useCallback((prod: Product3DModelData) => {
+    const template = {
+      rackType: prod.productType || 'Wall Rack',
+      productModelId: prod.productId,
+      productName: prod.productName,
+      sku: prod.sku,
+      width: prod.width,
+      depth: prod.depth,
+      height: prod.height,
+      shelves: prod.shelfCount || 6,
+      shelfCount: prod.shelfCount || 6,
+      shelfThickness: (prod as any)?.shelfThickness || 1.0,
+      shelfSpacing: 'auto' as const,
+      rotation: 0,
+    };
+    setPendingRackPlacement(template);
+    setActiveTool('rack');
+    setShowRackMenu(false);
+    setShowMobileProps(false);
+    setTabletInspectorOpen(false);
+
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      const centerWorld = viewportRef.current.screenToWorld({ x: rect.width / 2, y: rect.height / 2 });
+      setCursorWorldPos(centerWorld);
+    }
+  }, []);
+
+  const handleRotatePendingRack = useCallback(() => {
+    setPendingRackPlacement((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        rotation: (prev.rotation + 90) % 360,
+      };
+    });
+  }, []);
+
+  const handleCancelRackPlacement = useCallback(() => {
+    setPendingRackPlacement(null);
+    setActiveTool('select');
+  }, []);
+
+  const handleQuickPlaceCenter = useCallback(() => {
+    const template = pendingRackPlacementRef.current;
+    if (!template) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const screenCenter = { x: rect.width / 2, y: rect.height / 2 };
+    const worldCenter = viewportRef.current.screenToWorld(screenCenter);
+    const placement = calculateRackPlacement(worldCenter, template);
+    commitNewRackPlacement(placement, template);
+  }, [calculateRackPlacement, commitNewRackPlacement]);
 
   const updateEntityProperty = useCallback(<T extends CADEntity>(id: string, actionDesc: string, updater: (ent: T) => T) => {
     const newEntities = entitiesRef.current.map((e) => {
@@ -1233,8 +1245,9 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     );
 
     let rackPlacementPreview: any = null;
-    if (activeTool === 'rack' && pendingRackPlacementRef.current && cursorWorldPos) {
-      const calc = calculateRackPlacement(cursorWorldPos, pendingRackPlacementRef.current);
+    const activeCursor = cursorWorldPosRef.current || cursorWorldPos;
+    if (activeTool === 'rack' && pendingRackPlacementRef.current && activeCursor) {
+      const calc = calculateRackPlacement(activeCursor, pendingRackPlacementRef.current);
       rackPlacementPreview = {
         ...calc,
         width: pendingRackPlacementRef.current.width,
@@ -1274,6 +1287,176 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
   useEffect(() => {
     renderScene();
   }, [renderScene, wallToolPreview, aiPreviewRacks, aiPreviewDimensions, entities, selectedEntityIds, dragSelectionRect, measureAnnotations, pendingRackPlacement]);
+
+  // ── Contextual Substate Computation ──
+  const isContextualSubstate = useMemo(() => {
+    return (
+      showExitConfirmDialog ||
+      showShareModal ||
+      showAIPlanner ||
+      showCustomRackModal ||
+      showRackMenu ||
+      showMobileMoreTools ||
+      showMobileMoreMenu ||
+      activeTool === 'rack' ||
+      Boolean(pendingRackPlacement) ||
+      showMobileProps ||
+      tabletInspectorOpen ||
+      Boolean(selectedEntityId) ||
+      selectedEntityIds.size > 0 ||
+      activeTool !== 'select' ||
+      activeDrawingPoints.length > 0 ||
+      viewMode === '3D'
+    );
+  }, [
+    showExitConfirmDialog,
+    showShareModal,
+    showAIPlanner,
+    showCustomRackModal,
+    showRackMenu,
+    showMobileMoreTools,
+    showMobileMoreMenu,
+    activeTool,
+    pendingRackPlacement,
+    showMobileProps,
+    tabletInspectorOpen,
+    selectedEntityId,
+    selectedEntityIds,
+    activeDrawingPoints,
+    viewMode,
+  ]);
+
+  // ── Contextual Back Navigation Priority System ──
+  const handleContextualBack = useCallback((): boolean => {
+    // 1. If confirmation dialog is open, dismiss it
+    if (showExitConfirmDialog) {
+      setShowExitConfirmDialog(false);
+      return true;
+    }
+
+    // 2. If any modal or rack catalogue is open, close that modal
+    if (showShareModal) {
+      setShowShareModal(false);
+      return true;
+    }
+    if (showAIPlanner) {
+      setShowAIPlanner(false);
+      return true;
+    }
+    if (showCustomRackModal) {
+      setShowCustomRackModal(false);
+      return true;
+    }
+    if (showRackMenu) {
+      setShowRackMenu(false);
+      return true;
+    }
+    if (showMobileMoreTools) {
+      setShowMobileMoreTools(false);
+      return true;
+    }
+    if (showMobileMoreMenu) {
+      setShowMobileMoreMenu(false);
+      return true;
+    }
+
+    // 3. If user is in the 3D viewer, return to 2D editor
+    if (viewMode === '3D') {
+      setViewMode('2D');
+      return true;
+    }
+
+    // 4. If rack placement mode is active, cancel placement and discard unplaced preview
+    if (activeTool === 'rack' || pendingRackPlacementRef.current) {
+      setPendingRackPlacement(null);
+      setActiveTool('select');
+      renderScene();
+      return true;
+    }
+
+    // 5. If mobile properties drawer or tablet inspector is open, close the drawer
+    if (showMobileProps || tabletInspectorOpen || selectedEntityIdRef.current || selectedEntityIdsRef.current.size > 0) {
+      setShowMobileProps(false);
+      setTabletInspectorOpen(false);
+      setSelectedEntityId(null);
+      setSelectedEntityIds(new Set());
+      setPlacementModeTool(null);
+      setWallToolPreview(null);
+      renderScene();
+      return true;
+    }
+
+    // 6. If temporary CAD drawing tool is active, return to selection mode
+    if (activeTool !== 'select' || activeDrawingPointsRef.current.length > 0) {
+      setActiveTool('select');
+      setActiveDrawingPoints([]);
+      setPlacementModeTool(null);
+      setWallToolPreview(null);
+      renderScene();
+      return true;
+    }
+
+    // 7. Base level — user is requesting to navigate out of CAD editor
+    if (saveStatus === 'unsaved') {
+      setShowExitConfirmDialog(true);
+      return true;
+    }
+
+    if (onExit) {
+      onExit();
+      return true;
+    }
+
+    return false;
+  }, [
+    showExitConfirmDialog,
+    showShareModal,
+    showAIPlanner,
+    showCustomRackModal,
+    showRackMenu,
+    showMobileMoreTools,
+    showMobileMoreMenu,
+    activeTool,
+    showMobileProps,
+    tabletInspectorOpen,
+    viewMode,
+    saveStatus,
+    onExit,
+    renderScene,
+  ]);
+
+  const contextualBackRef = useRef(handleContextualBack);
+  useEffect(() => {
+    contextualBackRef.current = handleContextualBack;
+  }, [handleContextualBack]);
+
+  // ── History & Popstate Interceptor (Android Back & Browser Back) ──
+  useEffect(() => {
+    const cadMarker = { cadActive: true, time: Date.now() };
+    window.history.pushState(cadMarker, '', window.location.href);
+
+    const handlePopState = () => {
+      const handled = contextualBackRef.current();
+      if (handled) {
+        window.history.pushState(cadMarker, '', window.location.href);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (saveStatus === 'unsaved') {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [saveStatus]);
 
 
   // ─── Helper: is a rack entity a Center Rack type? ───
@@ -1467,8 +1650,9 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
   // 7. Mouse & Touch Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Ignore synthetic mouse events generated by touch within 450ms
-    if (Date.now() - lastTouchTimeRef.current < 450) {
+    // Ignore synthetic mouse events generated by mobile browsers within 500ms of touch or 600ms of touch rack placement
+    const isRecentTouch = Date.now() - lastTouchTimeRef.current < 1000;
+    if (isRecentTouch && (Date.now() - lastTouchTimeRef.current < 500 || Date.now() - lastPlacementTimeRef.current < 600)) {
       return;
     }
 
@@ -1478,29 +1662,45 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     const screenPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
 
+    const isMiddleOrPan = e.button === 1 || activeTool === 'pan' || e.altKey;
+    if (!isMiddleOrPan && e.button !== 0) return;
+
+    executePointerDown(
+      screenPt,
+      rawWorldPt,
+      !!(e.ctrlKey || e.metaKey || touchMultiSelectModeRef.current),
+      isMiddleOrPan
+    );
+  };
+
+  // ── Unified Pointer Down Core Logic (Mouse & Touch) ──
+  const executePointerDown = (
+    screenPt: Point2D,
+    rawWorldPt: Point2D,
+    isMultiSelectToggle: boolean,
+    isMiddleOrPan: boolean
+  ) => {
     isMouseDownRef.current = true;
     dragStartScreenRef.current = screenPt;
     dragStartWorldRef.current = rawWorldPt;
 
-    if (e.button === 1 || activeTool === 'pan' || e.altKey) {
+    if (isMiddleOrPan) {
       isMiddleDragRef.current = true;
       return;
     }
-
-    if (e.button !== 0) return;
 
     // ── Arm drag-selection rubber-band (select tool) ──
     // Must be done BEFORE the Ctrl+Click block so Ctrl+drag is also armed.
     // isDragSelectAddModeRef records whether to merge or replace on mouseup.
     if (activeTool === 'select') {
       isDragSelectingRef.current = false; // will be activated on move
-      isDragSelectAddModeRef.current = !!(e.ctrlKey || e.metaKey);
+      isDragSelectAddModeRef.current = isMultiSelectToggle;
       dragSelectStartScreenRef.current = screenPt;
       dragSelectStartWorldRef.current = rawWorldPt;
     }
 
     // ── Touch Multi-Select Mode OR Ctrl+Click multi-select toggle (select tool only) ──
-    if (activeTool === 'select' && (e.ctrlKey || e.metaKey || touchMultiSelectModeRef.current)) {
+    if (activeTool === 'select' && isMultiSelectToggle) {
       // Find the clicked rack
       let found: CADEntity | null = null;
       for (let i = entities.length - 1; i >= 0; i--) {
@@ -1988,12 +2188,8 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const screenPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-
+  // ── Unified Pointer Move Core Logic (Mouse & Touch) ──
+  const executePointerMove = (screenPt: Point2D, rawWorldPt: Point2D) => {
     if (isMiddleDragRef.current && isMouseDownRef.current) {
       const dx = screenPt.x - dragStartScreenRef.current.x;
       const dy = screenPt.y - dragStartScreenRef.current.y;
@@ -2003,7 +2199,6 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
       return;
     }
 
-    const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
     const basePoint = activeDrawingPoints.length > 0 ? activeDrawingPoints[0] : null;
     const snap = snapEngineRef.current.findSnapPoint(rawWorldPt, entities, viewportRef.current.zoom, basePoint);
 
@@ -2162,6 +2357,20 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     renderScene();
   };
 
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Ignore synthetic mouse events generated by mobile browsers within 500ms of touch or 600ms of touch rack placement
+    const isRecentTouch = Date.now() - lastTouchTimeRef.current < 1000;
+    if (isRecentTouch && (Date.now() - lastTouchTimeRef.current < 500 || Date.now() - lastPlacementTimeRef.current < 600)) {
+      return;
+    }
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const screenPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
+    executePointerMove(screenPt, rawWorldPt);
+  };
+
   const handleMouseUp = () => {
     // Finalize drag-selection
     if (isDragSelectingRef.current) {
@@ -2244,6 +2453,8 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
   // ── Touch Handlers for Pinch-to-Zoom, Two-Finger Pan, and Touch Interaction ──
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
     lastTouchTimeRef.current = Date.now();
+    touchStartTimeRef.current = Date.now();
+    touchMovedTotalRef.current = 0;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -2267,7 +2478,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
       pinchLastDistRef.current = dist;
       pinchLastMidpointRef.current = midScreen;
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       return;
     }
 
@@ -2278,25 +2489,16 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
       const t = e.touches[0];
       const screenPt = { x: t.clientX - rect.left, y: t.clientY - rect.top };
       touchStartPosRef.current = screenPt;
+      const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
 
       if (activeTool === 'rack' && pendingRackPlacementRef.current) {
-        const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
+        cursorWorldPosRef.current = rawWorldPt;
         setCursorWorldPos(rawWorldPt);
+        renderScene();
         return;
       }
 
-      const syntheticMouseEvent = {
-        clientX: t.clientX,
-        clientY: t.clientY,
-        button: 0,
-        altKey: false,
-        ctrlKey: touchMultiSelectModeRef.current,
-        metaKey: false,
-        preventDefault: () => {},
-        stopPropagation: () => {},
-      } as unknown as React.MouseEvent<HTMLCanvasElement>;
-
-      handleMouseDown(syntheticMouseEvent);
+      executePointerDown(screenPt, rawWorldPt, touchMultiSelectModeRef.current, false);
     }
   };
 
@@ -2328,7 +2530,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         pinchLastMidpointRef.current = midScreen;
         renderScene();
       }
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       return;
     }
 
@@ -2338,21 +2540,19 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
       }
       const t = e.touches[0];
       const screenPt = { x: t.clientX - rect.left, y: t.clientY - rect.top };
+      const moveDist = Math.hypot(screenPt.x - touchStartPosRef.current.x, screenPt.y - touchStartPosRef.current.y);
+      touchMovedTotalRef.current = Math.max(touchMovedTotalRef.current, moveDist);
+
+      const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
 
       if (activeTool === 'rack' && pendingRackPlacementRef.current) {
-        const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
+        cursorWorldPosRef.current = rawWorldPt;
         setCursorWorldPos(rawWorldPt);
+        renderScene();
         return;
       }
 
-      const syntheticMouseEvent = {
-        clientX: t.clientX,
-        clientY: t.clientY,
-        preventDefault: () => {},
-        stopPropagation: () => {},
-      } as unknown as React.MouseEvent<HTMLCanvasElement>;
-
-      handleMouseMove(syntheticMouseEvent);
+      executePointerMove(screenPt, rawWorldPt);
     }
   };
 
@@ -2372,17 +2572,24 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         const t = e.changedTouches[0];
         const rect = canvas.getBoundingClientRect();
         const screenPt = { x: t.clientX - rect.left, y: t.clientY - rect.top };
-        const dx = screenPt.x - touchStartPosRef.current.x;
-        const dy = screenPt.y - touchStartPosRef.current.y;
-        const moveDist = Math.hypot(dx, dy);
+        const elapsed = Date.now() - touchStartTimeRef.current;
+        const totalMoved = touchMovedTotalRef.current;
+        const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
 
-        // If finger moved less than 18px, treat as a deliberate tap to place rack
-        if (moveDist < 18) {
-          const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
+        // Tap detection: on touchscreens, a deliberate tap is < 28px movement and < 800ms duration
+        if (totalMoved < 28 && elapsed < 800) {
           const placement = calculateRackPlacement(rawWorldPt, pendingRackPlacementRef.current);
           commitNewRackPlacement(placement, pendingRackPlacementRef.current);
+          if (e.cancelable) e.preventDefault();
           return;
         }
+
+        // If finger dragged >= 28px, keep the preview anchored at this release location
+        cursorWorldPosRef.current = rawWorldPt;
+        setCursorWorldPos(rawWorldPt);
+        renderScene();
+        if (e.cancelable) e.preventDefault();
+        return;
       }
     }
 
@@ -2466,16 +2673,8 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         e.preventDefault();
         setOrthoMode((prev) => !prev);
       } else if (e.key === 'Escape') {
-        setActiveDrawingPoints([]);
-        setSelectedEntityId(null);
-        setSelectedEntityIds(new Set());
-        dragSelectionRectRef.current = null;
-        setDragSelectionRect(null);
-        isDragSelectingRef.current = false;
-        if (activeTool === 'rack') {
-          setPendingRackPlacement(null);
-          setActiveTool('select');
-        }
+        e.preventDefault();
+        contextualBackRef.current();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
         // Ctrl+A = Select all center racks
@@ -2682,9 +2881,15 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         {/* ── Mobile Top Toolbar (320px – 767px) ── */}
         <div className="flex md:hidden items-center justify-between px-2 h-12 bg-retailfix-dark-900 border-b border-slate-800 shrink-0 z-30 gap-1">
           <div className="flex items-center gap-1.5 min-w-0 max-w-[115px] sm:max-w-[160px]">
-            <div className="w-7 h-7 rounded-md bg-retailfix-red-600 flex items-center justify-center shrink-0 cursor-pointer" onClick={onExit} title="Exit to Projects">
-              <Compass className="w-4 h-4 text-white" />
-            </div>
+            <button
+              id="btn-mobile-back"
+              className="w-7 h-7 rounded-md bg-retailfix-red-600 active:bg-retailfix-red-700 flex items-center justify-center shrink-0 cursor-pointer touch-manipulation transition-colors"
+              onClick={() => handleContextualBack()}
+              title={isContextualSubstate ? "Back / Close (Esc)" : "Exit to Projects"}
+              aria-label={isContextualSubstate ? "Back" : "Exit"}
+            >
+              {isContextualSubstate ? <ArrowLeft className="w-4 h-4 text-white" /> : <Compass className="w-4 h-4 text-white" />}
+            </button>
             <div className="flex flex-col min-w-0 truncate">
               <span className="font-extrabold text-xs text-white leading-tight truncate">
                 {projectData?.surveyId || projectId}
@@ -2798,7 +3003,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         {/* ── Desktop & Tablet Top Toolbar (768px+) ── */}
         <div className="hidden md:flex items-center justify-between px-3 h-14 gap-2 overflow-x-auto scrollbar-hide">
           <div className="flex items-center gap-2 shrink-0">
-            <div className="flex items-center gap-2 cursor-pointer" onClick={onExit}>
+            <div className="flex items-center gap-2 cursor-pointer" onClick={() => handleContextualBack()} title="RetailFix CAD (Exit/Back)">
               <div className="w-8 h-8 rounded-lg bg-retailfix-red-600 flex items-center justify-center shadow-md">
                 <Compass className="w-5 h-5 text-white" />
               </div>
@@ -2901,6 +3106,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
             <div className="relative shrink-0">
               <button
+                id="btn-desktop-add-rack"
                 onClick={() => setShowRackMenu(true)}
                 className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-colors"
                 title="Open Rack Catalogue"
@@ -2978,6 +3184,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
           <div className="flex items-center gap-2 shrink-0">
             <button
+              id="btn-desktop-save"
               onClick={() => handleManualSave(false)}
               className="bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-colors"
             >
@@ -3035,8 +3242,9 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
             {onExit && (
               <button
-                onClick={onExit}
+                onClick={() => handleContextualBack()}
                 className="hidden sm:flex text-xs text-slate-400 hover:text-white px-2 py-1"
+                title="Exit CAD Editor"
               >
                 Exit
               </button>
@@ -3249,6 +3457,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
             </div>
           )}
           <canvas
+            id="cad-canvas"
             ref={canvasRef}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
@@ -3397,7 +3606,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
           {/* Interactive Rack Placement Floating Action Bar */}
           {activeTool === 'rack' && pendingRackPlacement && (
-            <div className="absolute top-16 md:top-4 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-30 pointer-events-none flex flex-col items-center">
+            <div id="rack-placement-action-bar" className="absolute top-16 md:top-4 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-30 pointer-events-none flex flex-col items-center">
               <div className="pointer-events-auto bg-slate-900/95 backdrop-blur-md border border-retailfix-red-500/60 rounded-2xl p-2.5 sm:px-4 sm:py-2.5 shadow-2xl shadow-red-950/40 flex flex-wrap items-center justify-between gap-2.5 max-w-lg w-full border-t-2 border-t-retailfix-red-500">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-retailfix-red-600/20 text-retailfix-red-400 border border-retailfix-red-500/30 flex items-center justify-center shrink-0">
@@ -3419,6 +3628,27 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                 {/* Placement Actions */}
                 <div className="flex items-center gap-1.5 ml-auto">
                   <button
+                    id="btn-rack-placement-confirm"
+                    onClick={() => {
+                      const template = pendingRackPlacementRef.current;
+                      if (!template) return;
+                      const canvas = canvasRef.current;
+                      if (!canvas) return;
+                      const targetPos = cursorWorldPosRef.current || viewportRef.current.screenToWorld({
+                        x: canvas.getBoundingClientRect().width / 2,
+                        y: canvas.getBoundingClientRect().height / 2,
+                      });
+                      const placement = calculateRackPlacement(targetPos, template);
+                      commitNewRackPlacement(placement, template);
+                    }}
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-md shadow-emerald-950/40 touch-manipulation transition-colors"
+                    title="Place rack at preview position"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Place Rack</span>
+                  </button>
+
+                  <button
                     id="btn-rack-placement-rotate"
                     onClick={handleRotatePendingRack}
                     className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1 border border-slate-700 shadow-sm touch-manipulation transition-colors"
@@ -3431,7 +3661,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                   <button
                     id="btn-rack-placement-center"
                     onClick={handleQuickPlaceCenter}
-                    className="hidden sm:flex px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold items-center gap-1 border border-slate-700 shadow-sm touch-manipulation transition-colors"
+                    className="flex px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold items-center gap-1 border border-slate-700 shadow-sm touch-manipulation transition-colors"
                     title="Place at room center"
                   >
                     <Maximize2 className="w-3 h-3 text-cyan-400" />
@@ -3494,6 +3724,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
               )}
               {/* Close Button on Mobile Sheet & Tablet Drawer */}
               <button
+                id="btn-close-properties"
                 onClick={() => {
                   setShowMobileProps(false);
                   setTabletInspectorOpen(false);
@@ -4610,6 +4841,58 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
           isOpen={showShareModal}
           onClose={() => setShowShareModal(false)}
         />
+      )}
+
+      {/* Unsaved Changes Exit Confirmation Modal */}
+      {showExitConfirmDialog && (
+        <div id="exit-confirm-dialog" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Unsaved Changes</h3>
+                <p className="text-xs text-slate-400">You have unsaved changes in your layout.</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-300">
+              Exiting now without saving will permanently discard changes made during this session.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 border-t border-slate-800">
+              <button
+                id="btn-exit-save"
+                onClick={async () => {
+                  await handleManualSave(false);
+                  setShowExitConfirmDialog(false);
+                  if (onExit) onExit();
+                }}
+                className="w-full sm:w-auto flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/40 touch-manipulation transition-colors"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save & Exit</span>
+              </button>
+              <button
+                id="btn-exit-discard"
+                onClick={() => {
+                  setShowExitConfirmDialog(false);
+                  if (onExit) onExit();
+                }}
+                className="w-full sm:w-auto py-2 px-3 bg-red-950/60 hover:bg-red-900/60 text-red-200 hover:text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border border-red-800/40 touch-manipulation transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Discard & Exit</span>
+              </button>
+              <button
+                id="btn-exit-cancel"
+                onClick={() => setShowExitConfirmDialog(false)}
+                className="w-full sm:w-auto py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center justify-center touch-manipulation transition-colors"
+              >
+                Keep Editing
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Mobile More Tools Bottom Sheet */}

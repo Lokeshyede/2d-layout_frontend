@@ -27,6 +27,7 @@ test.describe('Cross-Device CAD Rack Add & Placement E2E Matrix', () => {
       const isTouch = vp.category === 'mobile' || vp.category === 'tablet';
       const isMobile = vp.category === 'mobile';
       const context = await browser.newContext({
+        baseURL: 'http://127.0.0.1:4173',
         viewport: { width: vp.width, height: vp.height },
         hasTouch: isTouch,
         isMobile: isMobile,
@@ -87,6 +88,7 @@ test.describe('Cross-Device CAD Rack Add & Placement E2E Matrix', () => {
       });
 
       const surveyId = `rf-e2e-${vp.width}x${vp.height}`;
+      let savedProjectEntities: any[] = [];
       await page.route('**/api/projects/*', async (route) => {
         if (route.request().method() === 'GET') {
           await route.fulfill({
@@ -97,13 +99,16 @@ test.describe('Cross-Device CAD Rack Add & Placement E2E Matrix', () => {
               title: `Test Store ${surveyId}`,
               approxWidth: "50'-0\"",
               approxHeight: "30'-0\"",
-              entities: [],
+              entities: savedProjectEntities,
               versions: [],
               revision: 'REV 1',
             }),
           });
         } else {
           const postData = route.request().postDataJSON() || {};
+          if (postData.entities) {
+            savedProjectEntities = postData.entities;
+          }
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
@@ -228,15 +233,10 @@ test.describe('Cross-Device CAD Rack Add & Placement E2E Matrix', () => {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(canvas).toBeVisible({ timeout: 10000 });
       
-      // Confirm stored entities survive reload from local cache
-      const storedData = await page.evaluate((id) => localStorage.getItem(`retailfix_cad_${id}`), surveyId);
-      expect(storedData).not.toBeNull();
-      if (storedData) {
-        const parsed = JSON.parse(storedData);
-        expect(parsed.entities.length).toBeGreaterThanOrEqual(2);
-        const placedRacks = parsed.entities.filter((e: any) => e.type === 'rack');
-        expect(placedRacks.length).toBeGreaterThanOrEqual(2);
-      }
+      // Confirm stored entities survive reload from backend project record
+      expect(savedProjectEntities.length).toBeGreaterThanOrEqual(2);
+      const placedRacks = savedProjectEntities.filter((e: any) => e.type === 'rack');
+      expect(placedRacks.length).toBeGreaterThanOrEqual(2);
 
       await context.close();
     });
