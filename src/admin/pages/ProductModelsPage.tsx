@@ -662,7 +662,7 @@ export const ProductModelsPage: React.FC<ProductModelsPageProps> = ({ token }) =
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-sm">
+            <table className="w-full text-left border-collapse text-sm min-w-[950px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   <th className="px-5 py-3.5">Rack Name</th>
@@ -827,9 +827,9 @@ export const ProductModelsPage: React.FC<ProductModelsPageProps> = ({ token }) =
       {/* 1. VIEW RACK MODAL (Read-Only) */}
       {/* ========================================================= */}
       {viewProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200 my-8">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="relative w-full max-w-4xl max-h-[92dvh] bg-white rounded-2xl shadow-2xl overflow-y-auto border border-slate-200 my-auto">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-200 bg-slate-50">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-retailfix-red-600/10 text-retailfix-red-600 flex items-center justify-center">
                   <Eye className="w-4 h-4" />
@@ -969,9 +969,9 @@ export const ProductModelsPage: React.FC<ProductModelsPageProps> = ({ token }) =
       {/* 2. CREATE RACK MODAL */}
       {/* ========================================================= */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200 my-8">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="relative w-full max-w-2xl max-h-[92dvh] bg-white rounded-2xl shadow-2xl overflow-y-auto border border-slate-200 my-auto">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-200 bg-slate-50">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-retailfix-red-600/10 text-retailfix-red-600 flex items-center justify-center">
                   <Plus className="w-4 h-4" />
@@ -1370,9 +1370,9 @@ export const ProductModelsPage: React.FC<ProductModelsPageProps> = ({ token }) =
       {/* 3. EDIT RACK MODAL */}
       {/* ========================================================= */}
       {editProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200 my-8">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="relative w-full max-w-2xl max-h-[92dvh] bg-white rounded-2xl shadow-2xl overflow-y-auto border border-slate-200 my-auto">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-200 bg-slate-50">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-blue-600/10 text-blue-600 flex items-center justify-center">
                   <Edit className="w-4 h-4" />
@@ -1725,7 +1725,7 @@ export const ProductModelsPage: React.FC<ProductModelsPageProps> = ({ token }) =
                     Permanent deletion is unavailable to prevent breaking saved CAD layouts.
                     It will be archived instead.
                   </p>
-                  {refCheckResult.project_codes.length > 0 && (
+                  {Array.isArray(refCheckResult?.project_codes) && refCheckResult.project_codes.length > 0 && (
                     <div className="mt-2 text-[11px] font-mono text-amber-900 bg-amber-100/70 p-1.5 rounded">
                       Referenced in: {refCheckResult.project_codes.slice(0, 3).join(', ')}
                       {refCheckResult.project_codes.length > 3 && ` +${refCheckResult.project_codes.length - 3} more`}

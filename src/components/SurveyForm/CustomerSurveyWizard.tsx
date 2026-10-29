@@ -595,7 +595,7 @@ export const CustomerSurveyWizard: React.FC<CustomerSurveyWizardProps> = ({ onSu
 
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Survey Summary Overview</h4>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                 <div>
                   <span className="text-slate-700 block text-[10px]">Customer</span>
                   <strong className="text-slate-800">{customerName || '-'}</strong>

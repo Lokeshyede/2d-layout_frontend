@@ -91,12 +91,12 @@ export const AIPlannerModal: React.FC<AIPlannerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/60 flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-sm max-h-[92dvh] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/60 flex flex-col overflow-hidden">
 
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-4 bg-gradient-to-r from-violet-950/80 to-indigo-950/60 border-b border-slate-800">
+        <div className="flex items-center gap-3 px-4 sm:px-5 py-3.5 sm:py-4 bg-gradient-to-r from-violet-950/80 to-indigo-950/60 border-b border-slate-800">
           <div className="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center shadow">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
@@ -109,13 +109,13 @@ export const AIPlannerModal: React.FC<AIPlannerModalProps> = ({
           </button>
         </div>
 
-        <div className="p-5 space-y-5 overflow-y-auto max-h-[80vh]">
+        <div className="p-3.5 sm:p-5 space-y-4 sm:space-y-5 overflow-y-auto max-h-[calc(92dvh-70px)]">
 
           {/* OPTIONS */}
           {(modalState === "options" || modalState === "generating") && (<>
             <section>
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5">Rack Types</div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
                   { key: "includeWallRacks",   label: "Wall Racks",    sub: "7'×3' / 7'×4' (continuous run)" },
                   { key: "includeCenterRacks", label: "Center Racks",  sub: "5'×3' gondola" },
@@ -142,7 +142,7 @@ export const AIPlannerModal: React.FC<AIPlannerModalProps> = ({
               <div className="space-y-3">
                 <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
                   <div className="text-xs text-slate-300 font-medium mb-2">Minimum Aisle Width</div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="flex items-center gap-1">
                       <input type="number" min={2} max={20} value={aisleFt} onChange={(e) => setAisleFt(Math.max(2, parseInt(e.target.value) || 2))}
                         className="w-14 bg-slate-900 border border-slate-600 rounded-lg p-1.5 text-xs text-center text-white font-mono" />
@@ -159,7 +159,7 @@ export const AIPlannerModal: React.FC<AIPlannerModalProps> = ({
 
                 <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
                   <div className="text-xs text-slate-300 font-medium mb-2">Door / Column Clearance</div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="flex items-center gap-1">
                       <input type="number" min={0} max={10} value={clearFt} onChange={(e) => setClearFt(Math.max(0, parseInt(e.target.value) || 0))}
                         className="w-14 bg-slate-900 border border-slate-600 rounded-lg p-1.5 text-xs text-center text-white font-mono" />

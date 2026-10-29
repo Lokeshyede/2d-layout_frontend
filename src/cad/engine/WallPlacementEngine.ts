@@ -119,7 +119,7 @@ export class WallPlacementEngine {
    * Formats a list of all CAD walls for dropdowns (e.g. "Wall 1 — 50'-0\"")
    */
   public static getWallOptions(entities: CADEntity[]): WallOption[] {
-    const walls = entities.filter((e): e is WallEntity => e.type === 'wall');
+    const walls = (entities || []).filter((e): e is WallEntity => Boolean(e && e.type === 'wall'));
     return walls.map((wall, idx) => {
       const metrics = this.getWallMetrics(wall);
       const formatted = formatFeetInches(metrics.length);

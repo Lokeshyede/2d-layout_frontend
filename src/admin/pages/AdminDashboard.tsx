@@ -111,28 +111,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onOpenLay
 
       {/* Metrics Cards */}
       {stats && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Surveys</span>
-            <p className="text-3xl font-extrabold text-slate-900 font-mono">{stats.totalSurveys}</p>
+            <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">{stats.totalSurveys}</p>
             <p className="text-[11px] text-slate-400">All registered survey records</p>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Today's Surveys</span>
-            <p className="text-3xl font-extrabold text-retailfix-red-600 font-mono">{stats.todaySurveys}</p>
+            <p className="text-2xl sm:text-3xl font-extrabold text-retailfix-red-600 font-mono">{stats.todaySurveys}</p>
             <p className="text-[11px] text-slate-400">Submitted today</p>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Layouts Completed</span>
-            <p className="text-3xl font-extrabold text-emerald-600 font-mono">{stats.completedLayouts}</p>
+            <p className="text-2xl sm:text-3xl font-extrabold text-emerald-600 font-mono">{stats.completedLayouts}</p>
             <p className="text-[11px] text-slate-400">Ready for fixture quotation</p>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Draft / In-Progress</span>
-            <p className="text-3xl font-extrabold text-amber-600 font-mono">{stats.draftLayouts}</p>
+            <p className="text-2xl sm:text-3xl font-extrabold text-amber-600 font-mono">{stats.draftLayouts}</p>
             <p className="text-[11px] text-slate-400">Under CAD drafting</p>
           </div>
         </div>
@@ -192,7 +192,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onOpenLay
 
         {/* Surveys Table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left text-xs min-w-[700px]">
             <thead className="bg-slate-100/80 text-slate-600 font-bold uppercase tracking-wider border-b border-slate-200">
               <tr>
                 <th className="py-3 px-4">Survey ID</th>
@@ -336,7 +336,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onOpenLay
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1">
                 <span className="text-slate-400 font-semibold block text-[10px] uppercase">Customer Contact</span>
                 <p><strong>Owner:</strong> {activeSurveyDetail.customer.ownerName || '-'}</p>
@@ -376,12 +376,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onOpenLay
               </div>
             )}
 
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-2">
               <a
                 href={api.getExportPdfUrl(activeSurveyDetail.projectId)}
                 target="_blank"
                 rel="noreferrer"
-                className="bg-red-50 hover:bg-red-100 text-retailfix-red-600 font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5"
+                className="bg-red-50 hover:bg-red-100 text-retailfix-red-600 font-bold px-4 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5"
               >
                 <Download className="w-4 h-4" /> Download PDF Drawing Sheet
               </a>
@@ -391,7 +391,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onOpenLay
                   setActiveSurveyDetail(null);
                   onOpenLayout(activeSurveyDetail.projectId);
                 }}
-                className="bg-retailfix-red-600 hover:bg-retailfix-red-700 text-white font-bold px-5 py-2 rounded-lg text-xs flex items-center gap-1.5 shadow-md shadow-red-900/30"
+                className="bg-retailfix-red-600 hover:bg-retailfix-red-700 text-white font-bold px-5 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 shadow-md shadow-red-900/30"
               >
                 <Layout className="w-4 h-4" /> Open in CAD Designer
               </button>

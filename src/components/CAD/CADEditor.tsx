@@ -79,6 +79,11 @@ import {
   RotateCcw,
   Check,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  HelpCircle,
+  Store,
+  CornerDownRight,
 } from 'lucide-react';
 
 const EMPTY_ROOM_POLYGON: Point2D[] = [];
@@ -248,6 +253,31 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
   const [showAIPlanner, setShowAIPlanner] = useState(false);
   const [aiPreviewRacks, setAiPreviewRacks] = useState<RackEntity[]>([]);
   const [aiPreviewDimensions, setAiPreviewDimensions] = useState<import('../../cad/types').DimensionItem[]>([]);
+
+  // ── Planner 5D Redesign State ──
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showStarterCard, setShowStarterCard] = useState(true);
+  const [showQuickRoomModal, setShowQuickRoomModal] = useState(false);
+  const [quickRoomWidth, setQuickRoomWidth] = useState("30'-0\"");
+  const [quickRoomDepth, setQuickRoomDepth] = useState("20'-0\"");
+  const [showDesktopMoreMenu, setShowDesktopMoreMenu] = useState(false);
+  const [showShopGuide, setShowShopGuide] = useState(false);
+
+  // Beginner 6-Step Checklist computed completion state
+  const hasWalls = useMemo(() => entities.some((e) => e.type === 'wall'), [entities]);
+  const hasDoorsOrShutters = useMemo(() => entities.some((e) => e.type === 'door' || e.type === 'shutter' || e.type === 'gate' || e.type === 'glass_gate'), [entities]);
+  const hasColumns = useMemo(() => entities.some((e) => e.type === 'column'), [entities]);
+  const hasRacks = useMemo(() => entities.some((e) => e.type === 'rack'), [entities]);
+  const storeGuideCompletedCount = useMemo(() => {
+    let count = 0;
+    if (hasWalls) count++;
+    if (hasDoorsOrShutters) count++;
+    if (hasColumns) count++;
+    if (hasRacks) count++;
+    if (viewMode === '3D') count++;
+    if (saveStatus === 'saved') count++;
+    return count;
+  }, [hasWalls, hasDoorsOrShutters, hasColumns, hasRacks, viewMode, saveStatus]);
 
   const handleAddRack = (
     rackType: RackEntity['properties']['rackType'],
@@ -2761,6 +2791,164 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     renderScene();
   };
 
+  // ── Quick Store Setup & Tool Palette Action Handlers ──
+  const handleCreateQuickRoom = useCallback((widthStr: string, depthStr: string, thickness: number = 9) => {
+    const widthInches = parseFeetInches(widthStr) || 360; // default 30'
+    const depthInches = parseFeetInches(depthStr) || 240; // default 20'
+
+    const halfW = widthInches / 2;
+    const halfD = depthInches / 2;
+    const now = Date.now();
+
+    const walls: WallEntity[] = [
+      {
+        id: `wall_${now}_1`,
+        type: 'wall',
+        geometry: { x1: -halfW, y1: -halfD, x2: halfW, y2: -halfD },
+        properties: { thickness, isExterior: true },
+      },
+      {
+        id: `wall_${now}_2`,
+        type: 'wall',
+        geometry: { x1: halfW, y1: -halfD, x2: halfW, y2: halfD },
+        properties: { thickness, isExterior: true },
+      },
+      {
+        id: `wall_${now}_3`,
+        type: 'wall',
+        geometry: { x1: halfW, y1: halfD, x2: -halfW, y2: halfD },
+        properties: { thickness, isExterior: true },
+      },
+      {
+        id: `wall_${now}_4`,
+        type: 'wall',
+        geometry: { x1: -halfW, y1: halfD, x2: -halfW, y2: -halfD },
+        properties: { thickness, isExterior: true },
+      },
+    ];
+
+    updateEntitiesWithHistory([...entitiesRef.current, ...walls], 'Create Store Boundary');
+    setShowQuickRoomModal(false);
+    setShowStarterCard(false);
+
+    // Zoom to fit layout nicely
+    setTimeout(() => {
+      handleZoomToFit();
+    }, 50);
+  }, [updateEntitiesWithHistory, handleZoomToFit]);
+
+  const handleAddCornerRack = useCallback(() => {
+    const cornerProd = (activeProducts || []).find((p) =>
+      p.productType?.toLowerCase().includes('corner') ||
+      p.category?.toLowerCase().includes('corner') ||
+      p.productName?.toLowerCase().includes('corner')
+    );
+    if (cornerProd) {
+      handleSelectRackForPlacement(cornerProd);
+    } else {
+      const template = {
+        rackType: 'Corner Rack' as const,
+        productName: "Corner Display Rack 2' × 2'",
+        sku: 'SKU-CR-22',
+        width: 24,
+        depth: 24,
+        height: 84,
+        shelves: 6,
+        shelfCount: 6,
+        shelfThickness: 1.0,
+        shelfSpacing: 'auto' as const,
+        rotation: 0,
+      };
+      setPendingRackPlacement(template);
+      setActiveTool('rack');
+      setShowRackMenu(false);
+      setShowMobileProps(false);
+      setTabletInspectorOpen(false);
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const centerWorld = viewportRef.current.screenToWorld({ x: rect.width / 2, y: rect.height / 2 });
+        setCursorWorldPos(centerWorld);
+      }
+    }
+  }, [activeProducts, handleSelectRackForPlacement]);
+
+  const handleAddEndcapRack = useCallback(() => {
+    const endcapProd = (activeProducts || []).find((p) =>
+      p.productType?.toLowerCase().includes('end') ||
+      p.category?.toLowerCase().includes('end') ||
+      p.productName?.toLowerCase().includes('endcap')
+    );
+    if (endcapProd) {
+      handleSelectRackForPlacement(endcapProd);
+    } else {
+      const template = {
+        rackType: 'Endcap Rack' as const,
+        productName: "Endcap Gondola Display 5' × 3'",
+        sku: 'SKU-EC-53',
+        width: 36,
+        depth: 24,
+        height: 60,
+        shelves: 4,
+        shelfCount: 4,
+        shelfThickness: 1.0,
+        shelfSpacing: 'auto' as const,
+        rotation: 0,
+      };
+      setPendingRackPlacement(template);
+      setActiveTool('rack');
+      setShowRackMenu(false);
+      setShowMobileProps(false);
+      setTabletInspectorOpen(false);
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const centerWorld = viewportRef.current.screenToWorld({ x: rect.width / 2, y: rect.height / 2 });
+        setCursorWorldPos(centerWorld);
+      }
+    }
+  }, [activeProducts, handleSelectRackForPlacement]);
+
+  const handleOpenCustomRack = useCallback(() => {
+    setShowRackMenu(false);
+    setSelectedProductForCustom((activeProducts || [])[0] || null);
+    setShowCustomRackModal(true);
+  }, [activeProducts]);
+
+  const handleRotateCurrentSelection = useCallback(() => {
+    if (selectedEntityIdsRef.current.size > 0) {
+      handleRotateGroupCW();
+    } else if (selectedEntityIdRef.current) {
+      const curId = selectedEntityIdRef.current;
+      const target = entitiesRef.current.find((e) => e.id === curId);
+      if (target && target.type === 'rack') {
+        const curRot = (target as RackEntity).geometry.rotation || 0;
+        const newRot = (curRot + 90) % 360;
+        updateEntityProperty<RackEntity>(curId, 'Rotate Rack 90°', (e) => ({
+          ...e,
+          geometry: { ...e.geometry, rotation: newRot },
+        }));
+      }
+    }
+  }, [handleRotateGroupCW, updateEntityProperty]);
+
+  const handleDeleteCurrentSelection = useCallback(() => {
+    if (selectedEntityIdsRef.current.size > 0) {
+      const ids = selectedEntityIdsRef.current;
+      const remaining = entitiesRef.current.filter((e) => !ids.has(e.id));
+      updateEntitiesWithHistory(remaining, 'Delete Selected Racks');
+      setSelectedEntityIds(new Set());
+      setSelectedEntityId(null);
+      setShowMobileProps(false);
+    } else if (selectedEntityIdRef.current) {
+      const curId = selectedEntityIdRef.current;
+      const remaining = entitiesRef.current.filter((e) => e.id !== curId);
+      updateEntitiesWithHistory(remaining, 'Delete Entity');
+      setSelectedEntityId(null);
+      setShowMobileProps(false);
+    }
+  }, [updateEntitiesWithHistory]);
+
   // ─── Shared helper: render current CAD state to an off-screen canvas ───
   const buildExportCanvas = () => {
     dimManagerRef.current.setConfig({ roomShapeMode: viewportRef.current.roomShapeMode });
@@ -3002,47 +3190,55 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
         {/* ── Desktop & Tablet Top Toolbar (768px+) ── */}
         <div className="hidden md:flex items-center justify-between px-3 h-14 gap-2 overflow-x-auto scrollbar-hide">
+          {/* ZONE 1 (LEFT): Back / Project Name / Live Save Status / Undo & Redo / Save */}
           <div className="flex items-center gap-2 shrink-0">
-            <div className="flex items-center gap-2 cursor-pointer" onClick={() => handleContextualBack()} title="RetailFix CAD (Exit/Back)">
-              <div className="w-8 h-8 rounded-lg bg-retailfix-red-600 flex items-center justify-center shadow-md">
-                <Compass className="w-5 h-5 text-white" />
+            {/* Back to Projects */}
+            <div
+              className="flex items-center gap-2 cursor-pointer group"
+              onClick={() => handleContextualBack()}
+              title="RetailFix CAD (Exit/Back)"
+            >
+              <div className="w-8 h-8 rounded-lg bg-retailfix-red-600 flex items-center justify-center shadow-md group-hover:bg-retailfix-red-700 transition-colors">
+                <ArrowLeft className="w-4 h-4 text-white" />
               </div>
-              <div>
-                <span className="font-extrabold text-sm text-white">RETAIL<span className="text-retailfix-red-500">FIX</span></span>
-                <span className="text-[10px] text-slate-400 block font-mono">2D CAD</span>
+              <div className="hidden xl:flex flex-col">
+                <span className="font-extrabold text-sm text-white tracking-wide">
+                  RETAIL<span className="text-retailfix-red-500">FIX</span>
+                </span>
+                <span className="text-[9px] text-slate-400 font-mono -mt-0.5">2D CAD</span>
               </div>
             </div>
 
-            <div className="h-6 w-px bg-slate-700 mx-1" />
+            <div className="h-6 w-px bg-slate-800 mx-1" />
 
-            <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-xs">
-              <span className="text-slate-400 font-mono">SURVEY:</span>
-              <strong className="text-retailfix-red-400 font-mono font-bold">{projectData?.surveyId || projectId}</strong>
-              {projectData?.customerName && (
-                <>
-                  <span className="text-slate-500">•</span>
-                  <span className="text-slate-200 font-medium truncate max-w-[140px]">{projectData.customerName}</span>
-                </>
-              )}
+            {/* Project Title & Survey ID */}
+            <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700/80 px-2.5 py-1.5 rounded-lg text-xs">
+              <span className="font-bold text-white max-w-[130px] lg:max-w-[180px] truncate" title={projectData?.title || 'Store Layout'}>
+                {projectData?.title || 'Store Layout'}
+              </span>
+              <span className="text-slate-400 text-[10px] font-mono bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700/50">
+                {projectData?.surveyId || projectId}
+              </span>
             </div>
 
-            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-slate-800/80 border border-slate-700/60">
+            {/* Live Save Status Badge */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-800/50 border border-slate-700/60">
               {saveStatus === 'saved' && (
                 <>
                   <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-emerald-400">Saved ✓ {lastSavedTime && <span className="text-slate-400 text-[10px]">({lastSavedTime})</span>}</span>
+                  <span className="text-emerald-400">Saved ✓ {lastSavedTime && <span className="text-slate-400 text-[10px] hidden 2xl:inline">({lastSavedTime})</span>}</span>
                 </>
               )}
               {saveStatus === 'saving' && (
                 <>
                   <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                  <span className="text-amber-300">Auto-saving...</span>
+                  <span className="text-amber-300">Saving...</span>
                 </>
               )}
               {saveStatus === 'unsaved' && (
                 <>
                   <span className="w-2 h-2 rounded-full bg-blue-400" />
-                  <span className="text-slate-300">Changes pending...</span>
+                  <span className="text-slate-300">Unsaved changes</span>
                 </>
               )}
               {saveStatus === 'error' && (
@@ -3052,104 +3248,132 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                 </>
               )}
             </div>
-          </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => {
-                const prev = historyRef.current.undo();
-                if (prev) {
-                  setEntities(prev);
-                  triggerAutoSave(prev);
-                }
-              }}
-              disabled={!historyRef.current.canUndo()}
-              title="Undo (Ctrl+Z)"
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 text-slate-200"
-            >
-              <Undo2 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => {
-                const next = historyRef.current.redo();
-                if (next) {
-                  setEntities(next);
-                  triggerAutoSave(next);
-                }
-              }}
-              disabled={!historyRef.current.canRedo()}
-              title="Redo (Ctrl+Y)"
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 text-slate-200"
-            >
-              <Redo2 className="w-4 h-4" />
-            </button>
-
-            <div className="h-4 w-px bg-slate-700 mx-1" />
-
-            <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 px-2 py-1 rounded-lg text-xs font-mono">
-              <span className="text-slate-400 text-[10px]">REV:</span>
-              <span className="font-bold text-white">{revision}</span>
-              {isAdmin && (
-                <button
-                  onClick={() => {
-                    const nextRev = `REV ${revisionsList.length + 1}`;
-                    handleManualSave(true, nextRev);
-                  }}
-                  className="ml-1 text-[10px] text-retailfix-red-400 hover:text-retailfix-red-300 font-sans font-bold"
-                >
-                  + New Rev
-                </button>
-              )}
-            </div>
-
-            <div className="h-4 w-px bg-slate-700 mx-1" />
-
-            <div className="relative shrink-0">
+            {/* Undo / Redo */}
+            <div className="flex items-center gap-1">
               <button
-                id="btn-desktop-add-rack"
-                onClick={() => setShowRackMenu(true)}
-                className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-colors"
-                title="Open Rack Catalogue"
+                onClick={() => {
+                  const prev = historyRef.current.undo();
+                  if (prev) {
+                    setEntities(prev);
+                    triggerAutoSave(prev);
+                  }
+                }}
+                disabled={!historyRef.current.canUndo()}
+                title="Undo (Ctrl+Z)"
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 disabled:opacity-30 disabled:pointer-events-none text-slate-200 transition-colors"
               >
-                <ShoppingBag className="w-3.5 h-3.5" />
-                Add Rack ▼
+                <Undo2 className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => {
+                  const next = historyRef.current.redo();
+                  if (next) {
+                    setEntities(next);
+                    triggerAutoSave(next);
+                  }
+                }}
+                disabled={!historyRef.current.canRedo()}
+                title="Redo (Ctrl+Y)"
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 disabled:opacity-30 disabled:pointer-events-none text-slate-200 transition-colors"
+              >
+                <Redo2 className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Select All Center Racks button */}
+            {/* Desktop & Tablet Save Button */}
             <button
-              id="btn-select-all-centers"
-              onClick={handleSelectAllCenterRacks}
-              title="Select All Center Racks (Ctrl+A)"
-              className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-all ${
-                selectedEntityIds.size > 0
-                  ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-300 hover:bg-indigo-600/30'
-                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white'
+              id="btn-desktop-save"
+              onClick={() => handleManualSave(false)}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold border border-slate-700 shadow-sm transition-colors"
+              title="Save Project (Ctrl+S)"
+            >
+              <Save className="w-3.5 h-3.5 text-retailfix-red-400" />
+              <span>Save</span>
+            </button>
+          </div>
+
+          {/* ZONE 2 (CENTER): 2D Plan / 3D Preview Segmented Control */}
+          <div className="flex items-center bg-slate-950/80 border border-slate-800 p-1 rounded-xl shadow-inner shrink-0">
+            <button
+              id="btn-desktop-view-2d"
+              onClick={() => setViewMode('2D')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                viewMode === '2D'
+                  ? 'bg-retailfix-red-600 text-white shadow-md shadow-red-950/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
               }`}
             >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="1" y="1" width="6" height="6" rx="1" />
-                <rect x="9" y="1" width="6" height="6" rx="1" />
-                <rect x="1" y="9" width="6" height="6" rx="1" />
-                <rect x="9" y="9" width="6" height="6" rx="1" />
-              </svg>
-              <span className="hidden 2xl:inline">Select Centers</span>
-              {selectedEntityIds.size > 0 && (
-                <span className="bg-indigo-500 text-white text-[9px] font-extrabold px-1 rounded-full min-w-[16px] text-center">
-                  {selectedEntityIds.size}
-                </span>
-              )}
+              <Layers className="w-4 h-4" />
+              <span>2D Plan</span>
+            </button>
+            <button
+              id="btn-desktop-view-3d"
+              onClick={() => setViewMode('3D')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                viewMode === '3D'
+                  ? 'bg-retailfix-red-600 text-white shadow-md shadow-red-950/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <Box className="w-4 h-4" />
+              <span>3D Preview</span>
+            </button>
+          </div>
+
+          {/* ZONE 3 (RIGHT): Measurements / Zoom controls / Fit / Export PDF / More Actions */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Measurements visibility toggle */}
+            <button
+              id="btn-toggle-dimensions"
+              onClick={() => setShowDimensions(!showDimensions)}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-colors ${
+                showDimensions
+                  ? 'bg-slate-800 text-retailfix-red-400 border-retailfix-red-500/40 shadow-sm'
+                  : 'bg-slate-800/60 text-slate-400 border-slate-700/80 hover:text-white'
+              }`}
+              title="Toggle Real Architectural Dimensions"
+            >
+              <Ruler className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">Dimensions</span>
             </button>
 
-            {/* AI Rack Planner button */}
+            {/* Zoom Controls */}
+            <div className="flex items-center bg-slate-800/90 border border-slate-700 rounded-lg p-0.5">
+              <button
+                onClick={handleZoomOut}
+                title="Zoom Out (-)"
+                className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <button
+                id="btn-zoom-fit"
+                onClick={handleZoomToFit}
+                title="Fit Layout to Screen (F)"
+                className="px-2 py-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded flex items-center gap-1 text-[11px] font-mono transition-colors"
+              >
+                <Maximize className="w-3 h-3 text-cyan-400" />
+                <span className="hidden xl:inline">Fit</span>
+              </button>
+              <button
+                onClick={handleZoomIn}
+                title="Zoom In (+)"
+                className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* AI Planner launcher */}
             <button
               id="btn-desktop-ai-planner"
               onClick={() => { setShowRackMenu(false); setShowAIPlanner(true); }}
-              title="AI Rack Planner"
-              className="relative bg-gradient-to-r from-violet-700 to-indigo-700 hover:from-violet-600 hover:to-indigo-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-md shadow-violet-900/40 flex items-center gap-1.5 transition-all hover:scale-[1.02] shrink-0"
+              title="AI Auto Rack Planner"
+              className="hidden 2xl:flex relative bg-gradient-to-r from-violet-700 to-indigo-700 hover:from-violet-600 hover:to-indigo-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-md shadow-violet-950/40 items-center gap-1.5 transition-all hover:scale-[1.02]"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>AI Planner</span>
+              <span>AI Plan</span>
               {aiPreviewRacks.length > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-emerald-400 text-slate-900 text-[9px] font-extrabold flex items-center justify-center animate-pulse">
                   {aiPreviewRacks.length}
@@ -3157,78 +3381,21 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
               )}
             </button>
 
-            {/* 2D / 3D Store View Switcher */}
-            <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 p-0.5 rounded-lg text-xs ml-1 shrink-0">
-              <button
-                id="btn-desktop-view-2d"
-                onClick={() => setViewMode('2D')}
-                className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1.5 ${
-                  viewMode === '2D' ? 'bg-retailfix-red-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                2D
-              </button>
-              <button
-                id="btn-desktop-view-3d"
-                onClick={() => setViewMode('3D')}
-                className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1.5 ${
-                  viewMode === '3D' ? 'bg-retailfix-red-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Box className="w-3.5 h-3.5" />
-                3D
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
+            {/* Export PDF Button */}
             <button
-              id="btn-desktop-save"
-              onClick={() => handleManualSave(false)}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-colors"
-            >
-              <Save className="w-3.5 h-3.5 text-retailfix-red-400" />
-              Save
-            </button>
-
-            <button
-              id="btn-share-project"
-              onClick={() => setShowShareModal(true)}
-              title="Customer Presentation & Share Link"
-              className="hidden lg:flex bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-md shadow-emerald-900/30 items-center gap-1.5 transition-all hover:scale-[1.02]"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-              Share
-            </button>
-
-            <button
+              id="btn-export-pdf"
               onClick={handleDownloadPDF}
               disabled={isExporting}
-              className={`bg-retailfix-red-600 hover:bg-retailfix-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-md shadow-red-900/30 flex items-center gap-1.5 ${isExporting ? 'opacity-60 cursor-not-allowed' : ''}`}
+              className={`bg-retailfix-red-600 hover:bg-retailfix-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-md shadow-red-950/40 flex items-center gap-1.5 transition-colors ${
+                isExporting ? 'opacity-60 cursor-not-allowed' : ''
+              }`}
+              title="Export Architectural PDF Plan Sheet"
             >
               <FileDown className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">Export</span> PDF
+              <span>Export PDF</span>
             </button>
 
-            <button
-              onClick={handleDownloadPNG}
-              disabled={isExporting}
-              className="hidden lg:flex bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 items-center gap-1.5"
-            >
-              <Download className="w-3.5 h-3.5" />
-              PNG
-            </button>
-
-            <button
-              onClick={handleDownloadDXF}
-              className="hidden lg:flex bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 items-center gap-1.5"
-            >
-              <Download className="w-3.5 h-3.5" />
-              DXF
-            </button>
-
-            {/* Tablet Inspector Drawer Toggle */}
+            {/* Tablet Inspector Toggle */}
             <button
               onClick={() => setTabletInspectorOpen(!tabletInspectorOpen)}
               className={`flex lg:hidden items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${
@@ -3237,18 +3404,137 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
               title="Toggle Properties Panel"
             >
               <Sliders className="w-3.5 h-3.5" />
-              Props
+              <span className="hidden sm:inline">Props</span>
             </button>
 
-            {onExit && (
+            {/* More Actions Dropdown Menu Button */}
+            <div className="relative">
               <button
-                onClick={() => handleContextualBack()}
-                className="hidden sm:flex text-xs text-slate-400 hover:text-white px-2 py-1"
-                title="Exit CAD Editor"
+                id="btn-desktop-more-menu"
+                onClick={() => setShowDesktopMoreMenu(!showDesktopMoreMenu)}
+                className={`p-1.5 rounded-lg border transition-colors ${
+                  showDesktopMoreMenu
+                    ? 'bg-slate-700 text-white border-slate-600'
+                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white hover:bg-slate-700'
+                }`}
+                title="More Actions & Project Tools"
+                aria-label="More Project Actions"
               >
-                Exit
+                <MoreVertical className="w-4 h-4" />
               </button>
-            )}
+
+              {/* Desktop More Menu Dropdown */}
+              {showDesktopMoreMenu && (
+                <div className="absolute right-0 top-full mt-2 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2.5 z-50 text-xs space-y-2 backdrop-blur-md">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-slate-800 font-bold text-white text-xs">
+                    <span>Project Tools</span>
+                    <span className="text-[10px] text-slate-400 font-mono">{revision}</span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <button
+                      id="btn-share-project"
+                      onClick={() => { setShowDesktopMoreMenu(false); setShowShareModal(true); }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center gap-2 transition-colors font-medium"
+                    >
+                      <Share2 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Customer Presentation & Share</span>
+                    </button>
+
+                    <button
+                      onClick={() => { setShowDesktopMoreMenu(false); handleDownloadPNG(); }}
+                      disabled={isExporting}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center gap-2 transition-colors font-medium"
+                    >
+                      <Download className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Export Plan as PNG Image</span>
+                    </button>
+
+                    <button
+                      onClick={() => { setShowDesktopMoreMenu(false); handleDownloadDXF(); }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center gap-2 transition-colors font-medium"
+                    >
+                      <Download className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Export CAD File (DXF)</span>
+                    </button>
+
+                    <button
+                      id="btn-select-all-centers"
+                      onClick={() => { setShowDesktopMoreMenu(false); handleSelectAllCenterRacks(); }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-indigo-300 flex items-center gap-2 transition-colors font-medium"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <rect x="1" y="1" width="6" height="6" rx="1" />
+                        <rect x="9" y="1" width="6" height="6" rx="1" />
+                        <rect x="1" y="9" width="6" height="6" rx="1" />
+                        <rect x="9" y="9" width="6" height="6" rx="1" />
+                      </svg>
+                      <span>Select Center Racks ({entities.filter(isCenterRackEntity).length})</span>
+                    </button>
+
+                    <button
+                      onClick={() => { setShowDesktopMoreMenu(false); setShowShopGuide(true); }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-cyan-300 flex items-center gap-2 transition-colors font-medium"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Open Store Setup Guide</span>
+                    </button>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Canvas Display</span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        onClick={() => setShowGrid(!showGrid)}
+                        className={`p-1.5 rounded-lg border text-left text-[11px] font-medium ${showGrid ? 'bg-slate-800 border-retailfix-red-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
+                      >
+                        Grid: {showGrid ? 'ON' : 'OFF'}
+                      </button>
+                      <button
+                        onClick={() => setGridSnap(!gridSnap)}
+                        className={`p-1.5 rounded-lg border text-left text-[11px] font-medium ${gridSnap ? 'bg-slate-800 border-retailfix-red-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
+                      >
+                        Snap: {gridSnap ? 'ON' : 'OFF'}
+                      </button>
+                      <button
+                        onClick={() => setOrthoMode(!orthoMode)}
+                        className={`p-1.5 rounded-lg border text-left text-[11px] font-medium ${orthoMode ? 'bg-slate-800 border-retailfix-red-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
+                      >
+                        Ortho: {orthoMode ? 'ON' : 'OFF'}
+                      </button>
+                      <button
+                        onClick={() => setShowRackDimensions(!showRackDimensions)}
+                        className={`p-1.5 rounded-lg border text-left text-[11px] font-medium ${showRackDimensions ? 'bg-slate-800 border-retailfix-red-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
+                      >
+                        Rack Dims: {showRackDimensions ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        setShowDesktopMoreMenu(false);
+                        const nextRev = `REV ${revisionsList.length + 1}`;
+                        handleManualSave(true, nextRev);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg bg-slate-800 text-retailfix-red-400 hover:text-retailfix-red-300 font-bold transition-colors text-xs"
+                    >
+                      + Create New Revision
+                    </button>
+                  )}
+
+                  {onExit && (
+                    <button
+                      onClick={() => { setShowDesktopMoreMenu(false); handleContextualBack(); }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                    >
+                      Exit CAD Editor
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -3280,33 +3566,59 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {/* ── Desktop & Tablet Left Sidebar (768px+) ── */}
-        <aside className="hidden md:flex w-14 bg-retailfix-dark-900 border-r border-slate-800 flex-col items-center py-3 gap-2 z-20 shrink-0 overflow-y-auto">
-          {[
-            { tool: 'select', label: 'Select (V)', icon: MousePointer },
-            { tool: 'pan', label: 'Pan (H / Alt)', icon: Hand },
-            { tool: 'wall', label: 'Wall (W)', icon: Square },
-            { tool: 'partition', label: 'Partition (P)', icon: Layers },
-            { tool: 'column', label: 'Column (C)', icon: Box },
-            { tool: 'rack', label: 'Add Rack (R)', icon: ShoppingBag },
-            { tool: 'door', label: 'Door (D)', icon: DoorOpen },
-            { tool: 'window', label: 'Window (N)', icon: Maximize2 },
-            { tool: 'shutter', label: 'Rolling Shutter (S)', icon: Sliders },
-            { tool: 'gate', label: 'Security Gate', icon: Shield },
-            { tool: 'glass_gate', label: 'Glass Gate (G)', icon: Sliders },
-            { tool: 'measure', label: 'Tape Measure (T)', icon: Ruler },
-            { tool: 'text', label: 'Text Note (X)', icon: Type },
-            { tool: 'eraser', label: 'Eraser (E)', icon: Trash2 },
-          ].map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTool === item.tool;
-            return (
-              <div key={item.tool} className="relative">
+        <aside
+          className={`hidden md:flex ${
+            sidebarCollapsed ? 'w-16' : 'w-56'
+          } bg-retailfix-dark-900 border-r border-slate-800 flex-col py-2 z-20 shrink-0 transition-all duration-150 overflow-y-auto select-none`}
+        >
+          {/* Header with expand/collapse toggle */}
+          <div className="flex items-center justify-between px-3 pb-2 mb-1 border-b border-slate-800 shrink-0">
+            {!sidebarCollapsed && (
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+                CAD Tools
+              </span>
+            )}
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="p-1 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors ml-auto"
+              title={sidebarCollapsed ? "Expand Sidebar (Show Labels)" : "Collapse Sidebar (Icons Only)"}
+              aria-label="Toggle Sidebar"
+            >
+              {sidebarCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+
+          {/* GROUP 1 — BUILD SHOP */}
+          <div className="px-2 mb-2 space-y-1">
+            {!sidebarCollapsed ? (
+              <div className="text-[10px] font-extrabold text-slate-400 tracking-wider px-2 py-1 uppercase font-mono">
+                Build Shop
+              </div>
+            ) : (
+              <div className="h-px bg-slate-800 my-1 mx-2" title="Build Shop" />
+            )}
+
+            {[
+              { tool: 'select', label: 'Select', shortcut: '(V)', icon: MousePointer, tooltip: 'Select, move and inspect objects (V)' },
+              { tool: 'wall', label: 'Draw Wall', shortcut: '(W)', icon: Square, tooltip: 'Draw exterior or interior walls (W)' },
+              { tool: 'room_box', label: 'Room Box', shortcut: '', icon: Maximize2, tooltip: 'Quick rectangular store boundary generator', isAction: true, onClick: () => setShowQuickRoomModal(true) },
+              { tool: 'door', label: 'Door', shortcut: '(D)', icon: DoorOpen, tooltip: 'Add entrance or internal doors (D)' },
+              { tool: 'window', label: 'Window', shortcut: '(N)', icon: Maximize2, tooltip: 'Add exterior display windows (N)' },
+              { tool: 'shutter', label: 'Rolling Shutter', shortcut: '(S)', icon: Sliders, tooltip: 'Add commercial roll-up shutter (S)' },
+              { tool: 'column', label: 'Column / Pillar', shortcut: '(C)', icon: Box, tooltip: 'Add support pillar or wall column (C)' },
+              { tool: 'partition', label: 'Partition Wall', shortcut: '(P)', icon: Layers, tooltip: 'Add interior divider partition (P)' },
+            ].map((item) => {
+              const Icon = item.icon;
+              const isActive = !item.isAction && activeTool === item.tool;
+              return (
                 <button
+                  key={item.tool}
                   onClick={() => {
-                    if (item.tool === 'rack') {
-                      setShowRackMenu(true);
-                      setPlacementModeTool(null);
-                    } else if (['door', 'window', 'shutter', 'gate', 'glass_gate', 'column'].includes(item.tool)) {
+                    if (item.isAction && item.onClick) {
+                      item.onClick();
+                      return;
+                    }
+                    if (['door', 'window', 'shutter', 'column'].includes(item.tool)) {
                       setShowRackMenu(false);
                       setPendingRackPlacement(null);
                       setActiveTool(item.tool as ToolType);
@@ -3315,9 +3627,6 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                       setTabletInspectorOpen(true);
                       setShowMobileProps(true);
                       setActiveDrawingPoints([]);
-                      isDraggingEntityRef.current = false;
-                      isMouseDownRef.current = false;
-                      setSnapIndicator(null);
                     } else {
                       setShowRackMenu(false);
                       setPendingRackPlacement(null);
@@ -3325,23 +3634,210 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                       setPlacementModeTool(null);
                       setWallToolPreview(null);
                       setActiveDrawingPoints([]);
-                      isDraggingEntityRef.current = false;
-                      isMouseDownRef.current = false;
-                      setSnapIndicator(null);
                     }
                   }}
-                  title={item.tool === 'rack' ? 'Add Rack (R)' : item.label}
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
-                    isActive || (item.tool === 'rack' && (showRackMenu || Boolean(pendingRackPlacement)))
-                      ? 'bg-retailfix-red-600 text-white shadow-lg shadow-red-900/40 scale-105'
-                      : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                  title={item.tooltip}
+                  className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                    sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+                  } ${
+                    isActive
+                      ? 'bg-retailfix-red-600 text-white font-bold shadow-md shadow-red-950/40'
+                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-4 h-4 shrink-0" />
+                  {!sidebarCollapsed && (
+                    <div className="flex items-center justify-between w-full min-w-0">
+                      <span className="truncate">{item.label}</span>
+                      {item.shortcut && <span className="text-[10px] text-slate-400 font-mono ml-1">{item.shortcut}</span>}
+                    </div>
+                  )}
                 </button>
+              );
+            })}
+          </div>
+
+          {/* GROUP 2 — ADD DISPLAY */}
+          <div className="px-2 mb-2 space-y-1">
+            {!sidebarCollapsed ? (
+              <div className="text-[10px] font-extrabold text-slate-400 tracking-wider px-2 py-1 uppercase font-mono">
+                Add Display
               </div>
-            );
-          })}
+            ) : (
+              <div className="h-px bg-slate-800 my-1 mx-2" title="Add Display" />
+            )}
+
+            {/* Racks Catalogue Button (has id="btn-desktop-add-rack") */}
+            <button
+              id="btn-desktop-add-rack"
+              onClick={() => {
+                setShowRackMenu(true);
+                setPlacementModeTool(null);
+              }}
+              title="Open full retail racks catalogue (R)"
+              className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+              } ${
+                showRackMenu || (activeTool === 'rack' && Boolean(pendingRackPlacement))
+                  ? 'bg-retailfix-red-600 text-white font-bold shadow-md shadow-red-950/40'
+                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4 shrink-0 text-amber-400" />
+              {!sidebarCollapsed && (
+                <div className="flex items-center justify-between w-full min-w-0">
+                  <span className="truncate font-semibold">Racks Catalogue</span>
+                  <span className="text-[10px] text-slate-400 font-mono ml-1">(R)</span>
+                </div>
+              )}
+            </button>
+
+            {/* Corner Rack */}
+            <button
+              onClick={handleAddCornerRack}
+              title="Quick add 2'×2' corner display rack"
+              className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+              } text-slate-300 hover:bg-slate-800/80 hover:text-white`}
+            >
+              <CornerDownRight className="w-4 h-4 shrink-0 text-cyan-400" />
+              {!sidebarCollapsed && (
+                <div className="flex items-center justify-between w-full min-w-0">
+                  <span className="truncate">Corner Rack</span>
+                  <span className="text-[10px] text-slate-500 font-mono ml-1">2'x2'</span>
+                </div>
+              )}
+            </button>
+
+            {/* Endcap Rack */}
+            <button
+              onClick={handleAddEndcapRack}
+              title="Quick add 5'×3' aisle endcap rack"
+              className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+              } text-slate-300 hover:bg-slate-800/80 hover:text-white`}
+            >
+              <Layers className="w-4 h-4 shrink-0 text-emerald-400" />
+              {!sidebarCollapsed && (
+                <div className="flex items-center justify-between w-full min-w-0">
+                  <span className="truncate">Endcap Rack</span>
+                  <span className="text-[10px] text-slate-500 font-mono ml-1">5'x3'</span>
+                </div>
+              )}
+            </button>
+
+            {/* Custom Rack */}
+            <button
+              onClick={handleOpenCustomRack}
+              title="Define custom rack dimensions & shelves"
+              className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+              } text-slate-300 hover:bg-slate-800/80 hover:text-white`}
+            >
+              <Sliders className="w-4 h-4 shrink-0 text-violet-400" />
+              {!sidebarCollapsed && (
+                <div className="flex items-center justify-between w-full min-w-0">
+                  <span className="truncate">Custom Rack</span>
+                  <span className="text-[10px] text-slate-500 font-mono ml-1">Params</span>
+                </div>
+              )}
+            </button>
+          </div>
+
+          {/* GROUP 3 — MEASURE & EDIT */}
+          <div className="px-2 mb-2 space-y-1">
+            {!sidebarCollapsed ? (
+              <div className="text-[10px] font-extrabold text-slate-400 tracking-wider px-2 py-1 uppercase font-mono">
+                Measure & Edit
+              </div>
+            ) : (
+              <div className="h-px bg-slate-800 my-1 mx-2" title="Measure & Edit" />
+            )}
+
+            {/* Measure Tool */}
+            <button
+              onClick={() => {
+                setActiveTool('measure');
+                setPlacementModeTool(null);
+                setShowRackMenu(false);
+                setActiveDrawingPoints([]);
+              }}
+              title="Tape measure distance between two points (T)"
+              className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+              } ${
+                activeTool === 'measure'
+                  ? 'bg-retailfix-red-600 text-white font-bold shadow-md shadow-red-950/40'
+                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+              }`}
+            >
+              <Ruler className="w-4 h-4 shrink-0 text-amber-400" />
+              {!sidebarCollapsed && (
+                <div className="flex items-center justify-between w-full min-w-0">
+                  <span className="truncate">Measure</span>
+                  <span className="text-[10px] text-slate-400 font-mono ml-1">(T)</span>
+                </div>
+              )}
+            </button>
+
+            {/* Pan / Move Canvas */}
+            <button
+              onClick={() => {
+                setActiveTool(activeTool === 'pan' ? 'select' : 'pan');
+                setPlacementModeTool(null);
+                setShowRackMenu(false);
+              }}
+              title="Pan / Move canvas without selecting objects (H)"
+              className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+              } ${
+                activeTool === 'pan'
+                  ? 'bg-cyan-600 text-white font-bold shadow-md shadow-cyan-950/40'
+                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+              }`}
+            >
+              <Hand className="w-4 h-4 shrink-0" />
+              {!sidebarCollapsed && (
+                <div className="flex items-center justify-between w-full min-w-0">
+                  <span className="truncate">Pan Canvas</span>
+                  <span className="text-[10px] text-slate-400 font-mono ml-1">(H)</span>
+                </div>
+              )}
+            </button>
+
+            {/* Rotate 90° */}
+            <button
+              onClick={handleRotateCurrentSelection}
+              title="Rotate selected rack by 90 degrees"
+              className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+              } text-slate-300 hover:bg-slate-800/80 hover:text-white`}
+            >
+              <RotateCw className="w-4 h-4 shrink-0" />
+              {!sidebarCollapsed && (
+                <div className="flex items-center justify-between w-full min-w-0">
+                  <span className="truncate">Rotate 90°</span>
+                </div>
+              )}
+            </button>
+
+            {/* Delete */}
+            <button
+              onClick={handleDeleteCurrentSelection}
+              title="Delete selected wall or rack"
+              className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+              } text-red-400 hover:bg-red-950/40 hover:text-red-300`}
+            >
+              <Trash2 className="w-4 h-4 shrink-0" />
+              {!sidebarCollapsed && (
+                <div className="flex items-center justify-between w-full min-w-0">
+                  <span className="truncate">Delete</span>
+                  <span className="text-[10px] text-slate-500 font-mono ml-1">Del</span>
+                </div>
+              )}
+            </button>
+          </div>
         </aside>
 
         {/* ── Mobile Touch Bottom Dock (320px – 767px) — Only shown in 2D Layout Mode ── */}
@@ -3690,6 +4186,222 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
               </div>
             </div>
           )}
+
+          {/* Planner 5D-Inspired Empty-Canvas Onboarding Card */}
+          {entities.length === 0 && showStarterCard && viewMode === '2D' && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center p-4 pointer-events-none">
+              <div className="pointer-events-auto bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 shadow-2xl shadow-black/60 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-retailfix-red-600 flex items-center justify-center shadow-lg shadow-red-900/40 shrink-0">
+                      <Store className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-sm sm:text-base font-extrabold text-white">Welcome to RetailFix Store Designer</h2>
+                      <p className="text-xs text-slate-400 mt-0.5">Design a compliant retail store layout in feet and inches</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowStarterCard(false)}
+                    className="p-1 text-slate-500 hover:text-slate-300 rounded-lg hover:bg-slate-800 transition-colors"
+                    title="Dismiss and start with blank canvas"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-2.5">
+                  {/* Option 1: Quick Shop Dimensions */}
+                  <div className="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/90 hover:border-retailfix-red-500/60 transition-all">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="font-bold text-white text-xs flex items-center gap-2">
+                        <Maximize2 className="w-4 h-4 text-retailfix-red-400" />
+                        1. Quick Start: Set Shop Size
+                      </span>
+                      <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full font-semibold border border-emerald-500/20">
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-3">
+                      Enter shop width & length to generate all 4 exterior boundary walls:
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <div>
+                        <label className="text-[10px] text-slate-400 font-mono block mb-1">SHOP WIDTH (FT+IN)</label>
+                        <input
+                          type="text"
+                          value={quickRoomWidth}
+                          onChange={(e) => setQuickRoomWidth(e.target.value)}
+                          placeholder="e.g. 30'-0&quot;"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-retailfix-red-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-400 font-mono block mb-1">SHOP DEPTH / LENGTH (FT+IN)</label>
+                        <input
+                          type="text"
+                          value={quickRoomDepth}
+                          onChange={(e) => setQuickRoomDepth(e.target.value)}
+                          placeholder="e.g. 20'-0&quot;"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-retailfix-red-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleCreateQuickRoom(quickRoomWidth, quickRoomDepth)}
+                      className="w-full py-2 px-3 bg-retailfix-red-600 hover:bg-retailfix-red-700 active:bg-retailfix-red-800 text-white rounded-lg text-xs font-bold shadow-md shadow-red-950/40 flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <Square className="w-3.5 h-3.5" />
+                      <span>Create Store Boundary</span>
+                    </button>
+                  </div>
+
+                  {/* Option 2: Draw Custom Walls */}
+                  <button
+                    onClick={() => {
+                      setShowStarterCard(false);
+                      setActiveTool('wall');
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/60 hover:bg-slate-800/80 hover:border-slate-600 text-left transition-all flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Square className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <div>
+                        <span className="font-bold text-white text-xs block">2. Draw Custom Walls</span>
+                        <span className="text-[10px] text-slate-400">Click and drag freely to draw custom or angled walls</span>
+                      </div>
+                    </div>
+                    <ArrowLeft className="w-4 h-4 text-slate-500 rotate-180 shrink-0" />
+                  </button>
+
+                  {/* Option 3: Add Racks directly */}
+                  <button
+                    onClick={() => {
+                      setShowStarterCard(false);
+                      setShowRackMenu(true);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/60 hover:bg-slate-800/80 hover:border-slate-600 text-left transition-all flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <ShoppingBag className="w-4 h-4 text-amber-400 shrink-0" />
+                      <div>
+                        <span className="font-bold text-white text-xs block">3. Browse Racks Catalogue First</span>
+                        <span className="text-[10px] text-slate-400">Select wall display racks, center gondolas or endcaps</span>
+                      </div>
+                    </div>
+                    <ArrowLeft className="w-4 h-4 text-slate-500 rotate-180 shrink-0" />
+                  </button>
+                </div>
+
+                {/* Dismiss */}
+                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+                  <span className="text-[11px]">Need help? Check the Store Guide anytime</span>
+                  <button
+                    onClick={() => setShowStarterCard(false)}
+                    className="text-slate-400 hover:text-white underline text-[11px]"
+                  >
+                    Blank Canvas
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Beginner Store Setup Guide Widget (Bottom-Left) */}
+          <div className="hidden sm:flex absolute bottom-4 left-4 z-20 flex-col items-start gap-2">
+            <button
+              onClick={() => setShowShopGuide(!showShopGuide)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border shadow-xl flex items-center gap-2 backdrop-blur-md transition-all ${
+                showShopGuide
+                  ? 'bg-slate-900 border-retailfix-red-500 text-white'
+                  : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title="Store Setup Workflow Guide"
+            >
+              <HelpCircle className="w-3.5 h-3.5 text-retailfix-red-400" />
+              <span>Store Guide</span>
+              <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded-full text-slate-400 font-mono">
+                {storeGuideCompletedCount}/6
+              </span>
+            </button>
+
+            {showShopGuide && (
+              <div className="bg-slate-900/95 border border-slate-700 rounded-2xl p-4 w-72 shadow-2xl backdrop-blur-md text-xs space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="font-bold text-white text-xs uppercase tracking-wide">6-Step Store Setup</span>
+                  <button onClick={() => setShowShopGuide(false)} className="text-slate-400 hover:text-white p-1">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  {/* Step 1: Shop Boundary Walls */}
+                  <div className={`p-2 rounded-lg flex items-center justify-between ${hasWalls ? 'bg-emerald-950/30 border border-emerald-800/40 text-emerald-300' : 'bg-slate-800/50 text-slate-300'}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-4 h-4 rounded-full bg-slate-800 text-[10px] font-bold flex items-center justify-center shrink-0">1</span>
+                      <span className="truncate">Boundary Walls</span>
+                    </div>
+                    {hasWalls ? <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> : (
+                      <button onClick={() => setShowQuickRoomModal(true)} className="text-[10px] text-retailfix-red-400 hover:underline shrink-0 font-semibold">Set Size</button>
+                    )}
+                  </div>
+
+                  {/* Step 2: Doors & Openings */}
+                  <div className={`p-2 rounded-lg flex items-center justify-between ${hasDoorsOrShutters ? 'bg-emerald-950/30 border border-emerald-800/40 text-emerald-300' : 'bg-slate-800/50 text-slate-300'}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-4 h-4 rounded-full bg-slate-800 text-[10px] font-bold flex items-center justify-center shrink-0">2</span>
+                      <span className="truncate">Doors & Shutters</span>
+                    </div>
+                    {hasDoorsOrShutters ? <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> : (
+                      <button onClick={() => { setActiveTool('door'); setPlacementModeTool('door'); setShowMobileProps(true); }} className="text-[10px] text-retailfix-red-400 hover:underline shrink-0 font-semibold">Add</button>
+                    )}
+                  </div>
+
+                  {/* Step 3: Pillars & Columns */}
+                  <div className={`p-2 rounded-lg flex items-center justify-between ${hasColumns ? 'bg-emerald-950/30 border border-emerald-800/40 text-emerald-300' : 'bg-slate-800/50 text-slate-300'}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-4 h-4 rounded-full bg-slate-800 text-[10px] font-bold flex items-center justify-center shrink-0">3</span>
+                      <span className="truncate">Columns / Pillars</span>
+                    </div>
+                    {hasColumns ? <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> : (
+                      <button onClick={() => { setActiveTool('column'); setPlacementModeTool('column'); setShowMobileProps(true); }} className="text-[10px] text-retailfix-red-400 hover:underline shrink-0 font-semibold">Add</button>
+                    )}
+                  </div>
+
+                  {/* Step 4: Display Racks */}
+                  <div className={`p-2 rounded-lg flex items-center justify-between ${hasRacks ? 'bg-emerald-950/30 border border-emerald-800/40 text-emerald-300' : 'bg-slate-800/50 text-slate-300'}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-4 h-4 rounded-full bg-slate-800 text-[10px] font-bold flex items-center justify-center shrink-0">4</span>
+                      <span className="truncate">Display Racks</span>
+                    </div>
+                    {hasRacks ? <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> : (
+                      <button onClick={() => setShowRackMenu(true)} className="text-[10px] text-retailfix-red-400 hover:underline shrink-0 font-semibold">Add Racks</button>
+                    )}
+                  </div>
+
+                  {/* Step 5: Review in 3D */}
+                  <div className={`p-2 rounded-lg flex items-center justify-between ${viewMode === '3D' ? 'bg-indigo-950/30 border border-indigo-800/40 text-indigo-300' : 'bg-slate-800/50 text-slate-300'}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-4 h-4 rounded-full bg-slate-800 text-[10px] font-bold flex items-center justify-center shrink-0">5</span>
+                      <span className="truncate">3D Preview</span>
+                    </div>
+                    <button onClick={() => setViewMode(viewMode === '3D' ? '2D' : '3D')} className="text-[10px] text-retailfix-red-400 hover:underline shrink-0 font-semibold">
+                      {viewMode === '3D' ? 'In 3D' : 'Open 3D'}
+                    </button>
+                  </div>
+
+                  {/* Step 6: Save & Export PDF */}
+                  <div className="p-2 rounded-lg flex items-center justify-between bg-slate-800/50 text-slate-300">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-4 h-4 rounded-full bg-slate-800 text-[10px] font-bold flex items-center justify-center shrink-0">6</span>
+                      <span className="truncate">Export PDF Plan</span>
+                    </div>
+                    <button onClick={handleDownloadPDF} className="text-[10px] text-retailfix-red-400 hover:underline shrink-0 font-semibold">Export</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </main>
 
         {/* ── Properties Inspector: Mobile Bottom Sheet / Tablet Drawer / Desktop Sidebar ── */}
@@ -4775,6 +5487,73 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
           <span>SCALE: <strong className="text-slate-200">1/4" = 1'-0"</strong></span>
         </div>
       </footer>
+
+      {/* Quick Room Setup Modal (Planner 5D-Style Room Dimensions) */}
+      {showQuickRoomModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-retailfix-red-600 flex items-center justify-center text-white shadow-md">
+                  <Maximize2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-sm">Set Shop Dimensions</h3>
+                  <p className="text-[11px] text-slate-400">Generates 4 rectangular boundary walls</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowQuickRoomModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-300 font-medium block mb-1">Store Front Width (Feet + Inches)</label>
+                <input
+                  type="text"
+                  value={quickRoomWidth}
+                  onChange={(e) => setQuickRoomWidth(e.target.value)}
+                  placeholder="e.g. 30'-0&quot; or 30'"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:border-retailfix-red-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-300 font-medium block mb-1">Store Depth / Length (Feet + Inches)</label>
+                <input
+                  type="text"
+                  value={quickRoomDepth}
+                  onChange={(e) => setQuickRoomDepth(e.target.value)}
+                  placeholder="e.g. 20'-0&quot; or 20'"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:border-retailfix-red-500 focus:outline-none"
+                />
+              </div>
+              <div className="text-[11px] text-slate-400 bg-slate-800/60 p-2.5 rounded-lg border border-slate-800">
+                Standard exterior wall thickness: <span className="text-white font-bold font-mono">9 inches</span> (compliant with Indian retail construction).
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setShowQuickRoomModal(false)}
+                className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleCreateQuickRoom(quickRoomWidth, quickRoomDepth)}
+                className="px-4 py-2 rounded-lg bg-retailfix-red-600 hover:bg-retailfix-red-700 active:bg-retailfix-red-800 text-white text-xs font-bold shadow-md shadow-red-950/40 flex items-center gap-1.5 transition-colors"
+              >
+                <Square className="w-3.5 h-3.5" />
+                <span>Create Store Boundary</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Rack Catalogue Modal — Accessible across all screen sizes (Mobile, Tablet, Desktop) */}
       {showRackMenu && (

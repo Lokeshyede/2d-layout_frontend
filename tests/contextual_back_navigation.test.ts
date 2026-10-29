@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Contextual Back Navigation & Mobile Placement UX E2E Tests', () => {
 
   const setupMockApi = async (page: any, surveyId: string) => {
-    page.on('dialog', (dialog: any) => dialog.accept());
+    page.on('dialog', (dialog: any) => dialog.accept().catch(() => {}));
 
     await page.route('**/api/products*', async (route: any) => {
       await route.fulfill({
@@ -150,6 +150,7 @@ test.describe('Contextual Back Navigation & Mobile Placement UX E2E Tests', () =
       isMobile: true,
     });
     const page = await context.newPage();
+    page.on('dialog', (dialog: any) => dialog.accept().catch(() => {}));
     const surveyId = 'rf-confirm-btn-test';
 
     let lastSavedEntities: any[] = [];

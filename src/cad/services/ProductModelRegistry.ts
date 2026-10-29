@@ -91,7 +91,7 @@ class ProductModelRegistryService {
     const seen = new Set<string>();
     const list: Product3DModelData[] = [];
     for (const p of this.products.values()) {
-      if (!seen.has(p.productId)) {
+      if (p && p.productId && !seen.has(p.productId)) {
         seen.add(p.productId);
         list.push(p);
       }

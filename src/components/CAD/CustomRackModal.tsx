@@ -168,10 +168,10 @@ export const CustomRackModal: React.FC<CustomRackModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md max-h-[92dvh] shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-950/50">
+        <div className="flex items-center justify-between px-3.5 sm:px-5 py-3 sm:py-4 border-b border-slate-800 bg-slate-950/50">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-retailfix-red-600 flex items-center justify-center text-white shadow-md shadow-red-950">
               <Sliders className="w-4 h-4" />
@@ -193,13 +193,13 @@ export const CustomRackModal: React.FC<CustomRackModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 space-y-3.5 sm:space-y-4 max-h-[calc(92dvh-70px)] overflow-y-auto">
           {/* Base Product Model Selector */}
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5">
               Base Product Model:
             </label>
-            {availableProducts.length === 0 ? (
+            {safeAvailableProducts.length === 0 ? (
               <div className="p-3 bg-red-950/30 border border-red-800/40 rounded-lg text-xs text-red-300 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                 <span>No active products found in Admin. Upload a rack product in Admin first.</span>
