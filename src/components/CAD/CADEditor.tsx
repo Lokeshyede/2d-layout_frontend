@@ -44,6 +44,7 @@ import type { Product3DModelData } from '../../services/api';
 import { formatFeetInches, parseFeetInches, formatCustomRackLabel } from '../../cad/geometry/FeetInches';
 import { distance, midpoint, buildRoomPolygon, calculateWallInwardNormal, projectPointOntoLine } from '../../cad/geometry/GeometryMath';
 import { WallPlacementEngine, type WallPlacementCalculationResult } from '../../cad/engine/WallPlacementEngine';
+import { RackPlacementController, type RackPlacementTemplate, type RackPlacementCalculation } from '../../cad/engine/RackPlacementController';
 import { WallPositioningPanel } from './WallPositioningPanel';
 import { api, type ProjectDataResponse } from '../../services/api';
 import {
@@ -84,6 +85,8 @@ import {
   HelpCircle,
   Store,
   CornerDownRight,
+  LayoutGrid,
+  Columns,
 } from 'lucide-react';
 
 const EMPTY_ROOM_POLYGON: Point2D[] = [];
@@ -576,161 +579,19 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
   };
 
   // ── Rack Placement Mode Handlers ──
-  const calculateRackPlacement = useCallback((targetPt: Point2D, template: {
-    rackType: RackEntity['properties']['rackType'];
-    productModelId?: string;
-    productName?: string;
-    sku?: string;
-    width: number;
-    depth: number;
-    height: number;
-    shelves: number;
-    shelfCount: number;
-    shelfThickness: number;
-    shelfSpacing?: number | 'auto';
-    rotation: number;
-    isCustom?: boolean;
-    baseWidth?: number;
-    baseDepth?: number;
-    baseHeight?: number;
-    scalingMode?: string;
-  }) => {
-    const isWallRack =
-      template.rackType === 'wall_rack_7x3' ||
-      template.rackType === 'wall_rack_7x4' ||
-      template.rackType === 'Wall Rack' ||
-      template.rackType?.toLowerCase().includes('wall') ||
-      template.productName?.toLowerCase().includes('wall');
-
-    const isCornerRack =
-      template.rackType === 'corner_rack_2x2x2' ||
-      template.rackType === 'Corner Rack' ||
-      template.rackType?.toLowerCase().includes('corner') ||
-      template.productName?.toLowerCase().includes('corner');
-
+  const calculateRackPlacement = useCallback((
+    targetPt: Point2D,
+    template: RackPlacementTemplate
+  ): RackPlacementCalculation => {
     const walls = entitiesRef.current.filter((e): e is WallEntity => e.type === 'wall');
-
-    let x = targetPt.x;
-    let y = targetPt.y;
-    let rotation = template.rotation || 0;
-    let attachedWallId: string | undefined;
-    let wallSide: RackEntity['properties']['wallSide'];
-    let inwardNormal: Point2D | undefined;
-    let cornerPosition: RackEntity['properties']['cornerPosition'];
-    let isSnapped = false;
-    let snapType = 'Grid';
-
-    if (isWallRack && walls.length > 0) {
-      let bestWall: WallEntity | null = null;
-      let bestDist = Infinity;
-      let bestProj: any = null;
-
-      for (const w of walls) {
-        const proj = projectPointOntoLine(
-          targetPt,
-          { x: w.geometry.x1, y: w.geometry.y1 },
-          { x: w.geometry.x2, y: w.geometry.y2 }
-        );
-        if (proj.distance < bestDist) {
-          bestDist = proj.distance;
-          bestWall = w;
-          bestProj = proj;
-        }
-      }
-
-      if (bestWall && bestDist <= 72) {
-        attachedWallId = bestWall.id;
-        const wx1 = bestWall.geometry.x1, wy1 = bestWall.geometry.y1;
-        const wx2 = bestWall.geometry.x2, wy2 = bestWall.geometry.y2;
-        const wallAngle = Math.atan2(wy2 - wy1, wx2 - wx1) * (180 / Math.PI);
-        const wallLen = Math.hypot(wx2 - wx1, wy2 - wy1);
-
-        const roomPoly =
-          activeRoomPolygon.length >= 3
-            ? activeRoomPolygon
-            : buildRoomPolygon(walls);
-
-        const normals = calculateWallInwardNormal(
-          { x: wx1, y: wy1 },
-          { x: wx2, y: wy2 },
-          roomPoly
-        );
-        inwardNormal = normals.inwardNormal;
-
-        const rackHalfW = (template.width || 36) / 2;
-        const clampedT = Math.max(rackHalfW, Math.min(bestProj.distanceAlongLine, wallLen - rackHalfW));
-
-        const wallDir = wallLen > 0 ? { x: (wx2 - wx1) / wallLen, y: (wy2 - wy1) / wallLen } : { x: 1, y: 0 };
-        const wallThickness = bestWall.properties?.thickness ?? 9;
-
-        x = wx1 + wallDir.x * clampedT + inwardNormal.x * (wallThickness / 2);
-        y = wy1 + wallDir.y * clampedT + inwardNormal.y * (wallThickness / 2);
-
-        rotation = (wallAngle + (template.rotation || 0) + 360) % 360;
-
-        if (Math.abs(inwardNormal.y - 1) < 0.2) wallSide = 'top';
-        else if (Math.abs(inwardNormal.y + 1) < 0.2) wallSide = 'bottom';
-        else if (Math.abs(inwardNormal.x - 1) < 0.2) wallSide = 'left';
-        else if (Math.abs(inwardNormal.x + 1) < 0.2) wallSide = 'right';
-
-        isSnapped = true;
-        snapType = 'Wall';
-      } else {
-        x = Math.round(targetPt.x / 12) * 12;
-        y = Math.round(targetPt.y / 12) * 12;
-      }
-    } else if (isCornerRack && walls.length >= 4) {
-      const xs = walls.flatMap(ww => [ww.geometry.x1, ww.geometry.x2]);
-      const ys = walls.flatMap(ww => [ww.geometry.y1, ww.geometry.y2]);
-      const minX = Math.min(...xs), maxX = Math.max(...xs);
-      const minY = Math.min(...ys), maxY = Math.max(...ys);
-      const corners = [
-        { x: minX, y: minY, pos: 'top-left' as const, rot: 0 },
-        { x: maxX, y: minY, pos: 'top-right' as const, rot: 90 },
-        { x: maxX, y: maxY, pos: 'bottom-right' as const, rot: 180 },
-        { x: minX, y: maxY, pos: 'bottom-left' as const, rot: 270 },
-      ];
-      let bestCorner = corners[0];
-      let bestDist = Math.hypot(bestCorner.x - targetPt.x, bestCorner.y - targetPt.y);
-      for (const c of corners.slice(1)) {
-        const d = Math.hypot(c.x - targetPt.x, c.y - targetPt.y);
-        if (d < bestDist) { bestDist = d; bestCorner = c; }
-      }
-
-      if (bestDist <= 72) {
-        x = bestCorner.x;
-        y = bestCorner.y;
-        cornerPosition = bestCorner.pos;
-        rotation = (bestCorner.rot + (template.rotation || 0)) % 360;
-        isSnapped = true;
-        snapType = 'Corner';
-      } else {
-        x = Math.round(targetPt.x / 12) * 12;
-        y = Math.round(targetPt.y / 12) * 12;
-      }
-    } else {
-      const existingRacks = entitiesRef.current.filter((r): r is RackEntity => r.type === 'rack');
-      const dummyRack: RackEntity = {
-        id: 'preview',
-        type: 'rack',
-        geometry: { x: targetPt.x, y: targetPt.y, width: template.width, depth: template.depth, height: template.height, rotation: template.rotation },
-        properties: { rackType: template.rackType, productModelId: template.productModelId }
-      };
-
-      const bestSnap = RackConnectionEngine.findBestSnap(dummyRack, existingRacks, targetPt, template.rotation);
-      if (bestSnap && bestSnap.validation.isValid) {
-        x = bestSnap.position.x;
-        y = bestSnap.position.y;
-        rotation = bestSnap.rotation;
-        isSnapped = true;
-        snapType = 'Adjacent Rack';
-      } else {
-        x = Math.round(targetPt.x / 12) * 12;
-        y = Math.round(targetPt.y / 12) * 12;
-      }
-    }
-
-    return { x, y, rotation, attachedWallId, wallSide, inwardNormal, cornerPosition, isSnapped, snapType };
+    const existingRacks = entitiesRef.current.filter((e): e is RackEntity => e.type === 'rack');
+    return RackPlacementController.calculatePlacement(
+      targetPt,
+      template,
+      walls,
+      existingRacks,
+      activeRoomPolygon
+    );
   }, [activeRoomPolygon]);
 
   // Default parameters
@@ -856,44 +717,10 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
   }, [triggerAutoSave]);
 
   const commitNewRackPlacement = useCallback((
-    placement: ReturnType<typeof calculateRackPlacement>,
+    placement: RackPlacementCalculation,
     template: NonNullable<typeof pendingRackPlacement>
   ) => {
-    const matchedProduct = ProductModelRegistry.resolve(template.productModelId, template.rackType);
-    const resolvedShelfCount = template.shelfCount || matchedProduct?.shelfCount || 6;
-    const resolvedShelfThickness = template.shelfThickness || (matchedProduct as any)?.shelfThickness || 1.0;
-
-    const newRack: RackEntity = {
-      id: `rack_${Date.now()}`,
-      type: 'rack',
-      geometry: {
-        x: placement.x,
-        y: placement.y,
-        width: template.width,
-        depth: template.depth,
-        height: template.height,
-        rotation: placement.rotation,
-      },
-      properties: {
-        rackType: template.rackType,
-        productModelId: template.productModelId,
-        productName: template.productName || matchedProduct?.productName,
-        sku: template.sku || matchedProduct?.sku,
-        shelves: resolvedShelfCount,
-        shelfCount: resolvedShelfCount,
-        shelfSpacing: template.shelfSpacing || 'auto',
-        shelfThickness: resolvedShelfThickness,
-        attachedWallId: placement.attachedWallId,
-        wallSide: placement.wallSide,
-        inwardNormal: placement.inwardNormal,
-        cornerPosition: placement.cornerPosition,
-        isCustom: template.isCustom,
-        baseWidth: template.baseWidth,
-        baseDepth: template.baseDepth,
-        baseHeight: template.baseHeight,
-        scalingMode: template.scalingMode,
-      },
-    };
+    const newRack = RackPlacementController.createRackEntity(placement, template);
 
     updateEntitiesWithHistory([...entitiesRef.current, newRack], 'Add ' + (newRack.properties.productName || newRack.properties.rackType));
     setSelectedEntityId(newRack.id);
@@ -902,7 +729,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     lastPlacementTimeRef.current = Date.now();
     setPendingRackPlacement(null);
     setActiveTool('select');
-  }, [updateEntitiesWithHistory, calculateRackPlacement]);
+  }, [updateEntitiesWithHistory]);
 
   const handleSelectRackForPlacement = useCallback((prod: Product3DModelData) => {
     const template = {
@@ -929,6 +756,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     if (canvas) {
       const rect = canvas.getBoundingClientRect();
       const centerWorld = viewportRef.current.screenToWorld({ x: rect.width / 2, y: rect.height / 2 });
+      cursorWorldPosRef.current = centerWorld;
       setCursorWorldPos(centerWorld);
     }
   }, []);
@@ -1680,9 +1508,9 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
   // 7. Mouse & Touch Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Ignore synthetic mouse events generated by mobile browsers within 500ms of touch or 600ms of touch rack placement
+    // Ignore synthetic mouse events generated by mobile browsers within 500ms of touch or 800ms of rack placement
     const isRecentTouch = Date.now() - lastTouchTimeRef.current < 1000;
-    if (isRecentTouch && (Date.now() - lastTouchTimeRef.current < 500 || Date.now() - lastPlacementTimeRef.current < 600)) {
+    if (isRecentTouch && (Date.now() - lastTouchTimeRef.current < 500 || Date.now() - lastPlacementTimeRef.current < 800)) {
       return;
     }
 
@@ -2388,9 +2216,9 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Ignore synthetic mouse events generated by mobile browsers within 500ms of touch or 600ms of touch rack placement
+    // Ignore synthetic mouse events generated by mobile browsers within 500ms of touch or 800ms of rack placement
     const isRecentTouch = Date.now() - lastTouchTimeRef.current < 1000;
-    if (isRecentTouch && (Date.now() - lastTouchTimeRef.current < 500 || Date.now() - lastPlacementTimeRef.current < 600)) {
+    if (isRecentTouch && (Date.now() - lastTouchTimeRef.current < 500 || Date.now() - lastPlacementTimeRef.current < 800)) {
       return;
     }
     const canvas = canvasRef.current;
@@ -2607,7 +2435,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
 
         // Tap detection: on touchscreens, a deliberate tap is < 28px movement and < 800ms duration
-        if (totalMoved < 28 && elapsed < 800) {
+        if (RackPlacementController.isDeliberateTap(elapsed, totalMoved)) {
           const placement = calculateRackPlacement(rawWorldPt, pendingRackPlacementRef.current);
           commitNewRackPlacement(placement, pendingRackPlacementRef.current);
           if (e.cancelable) e.preventDefault();
@@ -2837,6 +2665,83 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     }, 50);
   }, [updateEntitiesWithHistory, handleZoomToFit]);
 
+  const handleAddWallRack = useCallback(() => {
+    const wallProd = (activeProducts || []).find((p) =>
+      p.productType?.toLowerCase().includes('wall') ||
+      p.category?.toLowerCase().includes('wall') ||
+      p.productName?.toLowerCase().includes('wall')
+    );
+    if (wallProd) {
+      handleSelectRackForPlacement(wallProd);
+    } else {
+      const template = {
+        rackType: 'Wall Rack' as const,
+        productName: "Wall Display Rack 7' × 3'",
+        sku: 'Wr-7x3',
+        width: 36,
+        depth: 18,
+        height: 84,
+        shelves: 6,
+        shelfCount: 6,
+        shelfThickness: 1.0,
+        shelfSpacing: 'auto' as const,
+        rotation: 0,
+      };
+      setPendingRackPlacement(template);
+      setActiveTool('rack');
+      setShowRackMenu(false);
+      setShowMobileProps(false);
+      setTabletInspectorOpen(false);
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const centerWorld = viewportRef.current.screenToWorld({ x: rect.width / 2, y: rect.height / 2 });
+        cursorWorldPosRef.current = centerWorld;
+        setCursorWorldPos(centerWorld);
+      }
+    }
+  }, [activeProducts, handleSelectRackForPlacement]);
+
+  const handleAddCenterRack = useCallback(() => {
+    const centerProd = (activeProducts || []).find((p) =>
+      p.productType?.toLowerCase().includes('center') ||
+      p.productType?.toLowerCase().includes('gondola') ||
+      p.category?.toLowerCase().includes('center') ||
+      p.category?.toLowerCase().includes('gondola') ||
+      p.productName?.toLowerCase().includes('center') ||
+      p.productName?.toLowerCase().includes('gondola')
+    );
+    if (centerProd) {
+      handleSelectRackForPlacement(centerProd);
+    } else {
+      const template = {
+        rackType: 'Center Rack' as const,
+        productName: "Center Gondola Rack 5' × 3'",
+        sku: 'wr - 5x3',
+        width: 36,
+        depth: 36,
+        height: 60,
+        shelves: 4,
+        shelfCount: 4,
+        shelfThickness: 1.0,
+        shelfSpacing: 'auto' as const,
+        rotation: 0,
+      };
+      setPendingRackPlacement(template);
+      setActiveTool('rack');
+      setShowRackMenu(false);
+      setShowMobileProps(false);
+      setTabletInspectorOpen(false);
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const centerWorld = viewportRef.current.screenToWorld({ x: rect.width / 2, y: rect.height / 2 });
+        cursorWorldPosRef.current = centerWorld;
+        setCursorWorldPos(centerWorld);
+      }
+    }
+  }, [activeProducts, handleSelectRackForPlacement]);
+
   const handleAddCornerRack = useCallback(() => {
     const cornerProd = (activeProducts || []).find((p) =>
       p.productType?.toLowerCase().includes('corner') ||
@@ -2868,6 +2773,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
       if (canvas) {
         const rect = canvas.getBoundingClientRect();
         const centerWorld = viewportRef.current.screenToWorld({ x: rect.width / 2, y: rect.height / 2 });
+        cursorWorldPosRef.current = centerWorld;
         setCursorWorldPos(centerWorld);
       }
     }
@@ -2904,6 +2810,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
       if (canvas) {
         const rect = canvas.getBoundingClientRect();
         const centerWorld = viewportRef.current.screenToWorld({ x: rect.width / 2, y: rect.height / 2 });
+        cursorWorldPosRef.current = centerWorld;
         setCursorWorldPos(centerWorld);
       }
     }
@@ -3688,6 +3595,40 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                 <div className="flex items-center justify-between w-full min-w-0">
                   <span className="truncate font-semibold">Racks Catalogue</span>
                   <span className="text-[10px] text-slate-400 font-mono ml-1">(R)</span>
+                </div>
+              )}
+            </button>
+
+            {/* Wall Rack */}
+            <button
+              onClick={handleAddWallRack}
+              title="Quick add 7'×3' wall display rack"
+              className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+              } text-slate-300 hover:bg-slate-800/80 hover:text-white`}
+            >
+              <LayoutGrid className="w-4 h-4 shrink-0 text-rose-400" />
+              {!sidebarCollapsed && (
+                <div className="flex items-center justify-between w-full min-w-0">
+                  <span className="truncate">Wall Rack</span>
+                  <span className="text-[10px] text-slate-500 font-mono ml-1">7'x3'</span>
+                </div>
+              )}
+            </button>
+
+            {/* Gondola / Centre Rack */}
+            <button
+              onClick={handleAddCenterRack}
+              title="Quick add 5'×3' center gondola rack"
+              className={`w-full min-h-[44px] rounded-xl flex items-center px-2.5 transition-all text-xs ${
+                sidebarCollapsed ? 'justify-center py-2' : 'justify-start gap-2.5 py-2'
+              } text-slate-300 hover:bg-slate-800/80 hover:text-white`}
+            >
+              <Columns className="w-4 h-4 shrink-0 text-amber-400" />
+              {!sidebarCollapsed && (
+                <div className="flex items-center justify-between w-full min-w-0">
+                  <span className="truncate">Centre Gondola</span>
+                  <span className="text-[10px] text-slate-500 font-mono ml-1">5'x3'</span>
                 </div>
               )}
             </button>
