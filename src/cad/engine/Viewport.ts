@@ -6,7 +6,7 @@ export class Viewport {
   public panY: number = 0;
   public width: number = 800;
   public height: number = 600;
-  public dpr: number = window.devicePixelRatio || 1;
+  public dpr: number = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
   public roomShapeMode?: 'AUTO' | 'MANUAL';
 
   constructor(state?: Partial<ViewportState>) {
@@ -18,7 +18,7 @@ export class Viewport {
     }
   }
 
-  public resize(width: number, height: number, dpr = window.devicePixelRatio || 1) {
+  public resize(width: number, height: number, dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1) {
     this.width = width;
     this.height = height;
     this.dpr = dpr;

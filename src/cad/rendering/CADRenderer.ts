@@ -55,6 +55,19 @@ export class CADRenderer {
     dragSelectionRect?: { x: number; y: number; w: number; h: number } | null;
     /** Persistent measure tool annotations — drawn in world-space, stable during pan/zoom */
     measureAnnotations?: MeasureAnnotation[];
+    /** Interactive Rack Placement preview */
+    rackPlacementPreview?: {
+      x: number;
+      y: number;
+      width: number;
+      depth: number;
+      height: number;
+      rotation: number;
+      rackType?: string;
+      productName?: string;
+      isSnapped?: boolean;
+      snapType?: string;
+    } | null;
   }) {
     const { ctx, viewport } = this;
     const { width, height, dpr } = viewport;
@@ -162,6 +175,11 @@ export class CADRenderer {
     // Real-time wall tool placement live preview
     if (params.wallToolPreview) {
       this.drawWallToolPreview(params.wallToolPreview);
+    }
+
+    // Real-time interactive rack placement live preview
+    if (params.rackPlacementPreview) {
+      this.drawRackPlacementPreview(params.rackPlacementPreview);
     }
 
     // Visual Debug Mode overlay
@@ -609,6 +627,87 @@ export class CADRenderer {
     ctx.font = 'bold 8px Inter, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('GATE', 0, 3);
+
+    ctx.restore();
+  }
+
+  public drawRackPlacementPreview(preview: {
+    x: number;
+    y: number;
+    width: number;
+    depth: number;
+    height: number;
+    rotation: number;
+    rackType?: string;
+    productName?: string;
+    isSnapped?: boolean;
+    snapType?: string;
+  }) {
+    const { ctx, viewport } = this;
+    const { x, y, width, depth, rotation, productName, isSnapped, snapType } = preview;
+
+    ctx.save();
+    const centerScreen = viewport.worldToScreen({ x, y });
+    const rad = ((rotation || 0) * Math.PI) / 180;
+    const rw = width * viewport.zoom;
+    const rd = depth * viewport.zoom;
+
+    ctx.translate(centerScreen.x, centerScreen.y);
+    ctx.rotate(rad);
+
+    // Glow shadow
+    ctx.shadowColor = isSnapped ? 'rgba(16, 185, 129, 0.4)' : 'rgba(220, 38, 38, 0.35)';
+    ctx.shadowBlur = 8;
+
+    // Semi-transparent Fill
+    ctx.fillStyle = isSnapped ? 'rgba(16, 185, 129, 0.18)' : 'rgba(220, 38, 38, 0.2)';
+    ctx.fillRect(-rw / 2, -rd / 2, rw, rd);
+
+    // Dashed Outline
+    ctx.strokeStyle = isSnapped ? '#10b981' : '#dc2626';
+    ctx.lineWidth = Math.max(1.5, 2);
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(-rw / 2, -rd / 2, rw, rd);
+    ctx.setLineDash([]);
+
+    // Front face shelf indicator (bold line along +Y or front edge)
+    ctx.strokeStyle = isSnapped ? '#34d399' : '#f87171';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-rw / 2, rd / 2);
+    ctx.lineTo(rw / 2, rd / 2);
+    ctx.stroke();
+
+    // Center crosshair
+    ctx.strokeStyle = isSnapped ? 'rgba(52, 211, 153, 0.7)' : 'rgba(248, 113, 113, 0.7)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-6, 0); ctx.lineTo(6, 0);
+    ctx.moveTo(0, -6); ctx.lineTo(0, 6);
+    ctx.stroke();
+
+    // Info Badge
+    ctx.shadowBlur = 0;
+    ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = productName || 'Rack';
+    const dimText = `${formatFeetInches(width)} × ${formatFeetInches(depth)}`;
+
+    const badgeW = Math.max(Math.min(rw * 0.95, 160), 90);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+    ctx.beginPath();
+    ctx.roundRect(-badgeW / 2, -15, badgeW, 30, 6);
+    ctx.fill();
+    ctx.strokeStyle = isSnapped ? '#10b981' : '#475569';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(label, 0, -5);
+    ctx.fillStyle = isSnapped ? '#34d399' : '#cbd5e1';
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.fillText(isSnapped ? `[${snapType || 'SNAP'}] ${dimText}` : dimText, 0, 7);
 
     ctx.restore();
   }

@@ -35,6 +35,7 @@ import { DXFExporter } from '../../cad/export/DXFExporter';
 import { DimensionInput } from './DimensionInput';
 import { AIPlannerModal } from './AIPlannerModal';
 import { CustomRackModal, type CustomRackParams } from './CustomRackModal';
+import { RackCatalogueModal } from './RackCatalogueModal';
 import { ShareModal } from './ShareModal';
 import { MultiSelectRotationToolbar } from './MultiSelectRotationToolbar';
 import { Store3DViewer } from '../../cad/rendering3d/Store3DViewer';
@@ -73,9 +74,6 @@ import {
   RotateCw,
   Share2,
   AlertCircle,
-  PackageX,
-  RefreshCw,
-  ExternalLink,
   MoreVertical,
   X,
   RotateCcw,
@@ -204,6 +202,34 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
   const wallToolPreviewRef = useRef<WallPlacementCalculationResult | null>(null);
 
   const [showRackMenu, setShowRackMenu] = useState(false);
+
+  // Interactive Rack Placement state
+  const [pendingRackPlacement, setPendingRackPlacement] = useState<{
+    rackType: RackEntity['properties']['rackType'];
+    productModelId?: string;
+    productName?: string;
+    sku?: string;
+    width: number;
+    depth: number;
+    height: number;
+    shelves: number;
+    shelfCount: number;
+    shelfThickness: number;
+    shelfSpacing?: number | 'auto';
+    rotation: number;
+    isCustom?: boolean;
+    baseWidth?: number;
+    baseDepth?: number;
+    baseHeight?: number;
+    scalingMode?: string;
+  } | null>(null);
+  const pendingRackPlacementRef = useRef(pendingRackPlacement);
+  useEffect(() => {
+    pendingRackPlacementRef.current = pendingRackPlacement;
+  }, [pendingRackPlacement]);
+
+  const lastTouchTimeRef = useRef<number>(0);
+  const touchStartPosRef = useRef<Point2D>({ x: 0, y: 0 });
 
   // 3D View State
   const [viewMode, setViewMode] = useState<'2D' | '3D'>('2D');
@@ -508,6 +534,266 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     setShowRackMenu(false);
     setActiveTool('select');
   };
+
+  // ── Rack Placement Mode Handlers ──
+  const calculateRackPlacement = useCallback((targetPt: Point2D, template: {
+    rackType: RackEntity['properties']['rackType'];
+    productModelId?: string;
+    productName?: string;
+    sku?: string;
+    width: number;
+    depth: number;
+    height: number;
+    shelves: number;
+    shelfCount: number;
+    shelfThickness: number;
+    shelfSpacing?: number | 'auto';
+    rotation: number;
+    isCustom?: boolean;
+    baseWidth?: number;
+    baseDepth?: number;
+    baseHeight?: number;
+    scalingMode?: string;
+  }) => {
+    const isWallRack =
+      template.rackType === 'wall_rack_7x3' ||
+      template.rackType === 'wall_rack_7x4' ||
+      template.rackType === 'Wall Rack' ||
+      template.rackType?.toLowerCase().includes('wall') ||
+      template.productName?.toLowerCase().includes('wall');
+
+    const isCornerRack =
+      template.rackType === 'corner_rack_2x2x2' ||
+      template.rackType === 'Corner Rack' ||
+      template.rackType?.toLowerCase().includes('corner') ||
+      template.productName?.toLowerCase().includes('corner');
+
+    const walls = entitiesRef.current.filter((e): e is WallEntity => e.type === 'wall');
+
+    let x = targetPt.x;
+    let y = targetPt.y;
+    let rotation = template.rotation || 0;
+    let attachedWallId: string | undefined;
+    let wallSide: RackEntity['properties']['wallSide'];
+    let inwardNormal: Point2D | undefined;
+    let cornerPosition: RackEntity['properties']['cornerPosition'];
+    let isSnapped = false;
+    let snapType = 'Grid';
+
+    if (isWallRack && walls.length > 0) {
+      let bestWall: WallEntity | null = null;
+      let bestDist = Infinity;
+      let bestProj: any = null;
+
+      for (const w of walls) {
+        const proj = projectPointOntoLine(
+          targetPt,
+          { x: w.geometry.x1, y: w.geometry.y1 },
+          { x: w.geometry.x2, y: w.geometry.y2 }
+        );
+        if (proj.distance < bestDist) {
+          bestDist = proj.distance;
+          bestWall = w;
+          bestProj = proj;
+        }
+      }
+
+      if (bestWall && bestDist <= 72) {
+        attachedWallId = bestWall.id;
+        const wx1 = bestWall.geometry.x1, wy1 = bestWall.geometry.y1;
+        const wx2 = bestWall.geometry.x2, wy2 = bestWall.geometry.y2;
+        const wallAngle = Math.atan2(wy2 - wy1, wx2 - wx1) * (180 / Math.PI);
+        const wallLen = Math.hypot(wx2 - wx1, wy2 - wy1);
+
+        const roomPoly =
+          activeRoomPolygon.length >= 3
+            ? activeRoomPolygon
+            : buildRoomPolygon(walls);
+
+        const normals = calculateWallInwardNormal(
+          { x: wx1, y: wy1 },
+          { x: wx2, y: wy2 },
+          roomPoly
+        );
+        inwardNormal = normals.inwardNormal;
+
+        const rackHalfW = (template.width || 36) / 2;
+        const clampedT = Math.max(rackHalfW, Math.min(bestProj.distanceAlongLine, wallLen - rackHalfW));
+
+        const wallDir = wallLen > 0 ? { x: (wx2 - wx1) / wallLen, y: (wy2 - wy1) / wallLen } : { x: 1, y: 0 };
+        const wallThickness = bestWall.properties?.thickness ?? 9;
+
+        x = wx1 + wallDir.x * clampedT + inwardNormal.x * (wallThickness / 2);
+        y = wy1 + wallDir.y * clampedT + inwardNormal.y * (wallThickness / 2);
+
+        rotation = (wallAngle + (template.rotation || 0) + 360) % 360;
+
+        if (Math.abs(inwardNormal.y - 1) < 0.2) wallSide = 'top';
+        else if (Math.abs(inwardNormal.y + 1) < 0.2) wallSide = 'bottom';
+        else if (Math.abs(inwardNormal.x - 1) < 0.2) wallSide = 'left';
+        else if (Math.abs(inwardNormal.x + 1) < 0.2) wallSide = 'right';
+
+        isSnapped = true;
+        snapType = 'Wall';
+      } else {
+        x = Math.round(targetPt.x / 12) * 12;
+        y = Math.round(targetPt.y / 12) * 12;
+      }
+    } else if (isCornerRack && walls.length >= 4) {
+      const xs = walls.flatMap(ww => [ww.geometry.x1, ww.geometry.x2]);
+      const ys = walls.flatMap(ww => [ww.geometry.y1, ww.geometry.y2]);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const corners = [
+        { x: minX, y: minY, pos: 'top-left' as const, rot: 0 },
+        { x: maxX, y: minY, pos: 'top-right' as const, rot: 90 },
+        { x: maxX, y: maxY, pos: 'bottom-right' as const, rot: 180 },
+        { x: minX, y: maxY, pos: 'bottom-left' as const, rot: 270 },
+      ];
+      let bestCorner = corners[0];
+      let bestDist = Math.hypot(bestCorner.x - targetPt.x, bestCorner.y - targetPt.y);
+      for (const c of corners.slice(1)) {
+        const d = Math.hypot(c.x - targetPt.x, c.y - targetPt.y);
+        if (d < bestDist) { bestDist = d; bestCorner = c; }
+      }
+
+      if (bestDist <= 72) {
+        x = bestCorner.x;
+        y = bestCorner.y;
+        cornerPosition = bestCorner.pos;
+        rotation = (bestCorner.rot + (template.rotation || 0)) % 360;
+        isSnapped = true;
+        snapType = 'Corner';
+      } else {
+        x = Math.round(targetPt.x / 12) * 12;
+        y = Math.round(targetPt.y / 12) * 12;
+      }
+    } else {
+      const existingRacks = entitiesRef.current.filter((r): r is RackEntity => r.type === 'rack');
+      const dummyRack: RackEntity = {
+        id: 'preview',
+        type: 'rack',
+        geometry: { x: targetPt.x, y: targetPt.y, width: template.width, depth: template.depth, height: template.height, rotation: template.rotation },
+        properties: { rackType: template.rackType, productModelId: template.productModelId }
+      };
+
+      const bestSnap = RackConnectionEngine.findBestSnap(dummyRack, existingRacks, targetPt, template.rotation);
+      if (bestSnap && bestSnap.validation.isValid) {
+        x = bestSnap.position.x;
+        y = bestSnap.position.y;
+        rotation = bestSnap.rotation;
+        isSnapped = true;
+        snapType = 'Adjacent Rack';
+      } else {
+        x = Math.round(targetPt.x / 12) * 12;
+        y = Math.round(targetPt.y / 12) * 12;
+      }
+    }
+
+    return { x, y, rotation, attachedWallId, wallSide, inwardNormal, cornerPosition, isSnapped, snapType };
+  }, [activeRoomPolygon]);
+
+  const commitNewRackPlacement = useCallback((
+    placement: ReturnType<typeof calculateRackPlacement>,
+    template: NonNullable<typeof pendingRackPlacement>
+  ) => {
+    const matchedProduct = ProductModelRegistry.resolve(template.productModelId, template.rackType);
+    const resolvedShelfCount = template.shelfCount || matchedProduct?.shelfCount || 6;
+    const resolvedShelfThickness = template.shelfThickness || (matchedProduct as any)?.shelfThickness || 1.0;
+
+    const newRack: RackEntity = {
+      id: `rack_${Date.now()}`,
+      type: 'rack',
+      geometry: {
+        x: placement.x,
+        y: placement.y,
+        width: template.width,
+        depth: template.depth,
+        height: template.height,
+        rotation: placement.rotation,
+      },
+      properties: {
+        rackType: template.rackType,
+        productModelId: template.productModelId,
+        productName: template.productName || matchedProduct?.productName,
+        sku: template.sku || matchedProduct?.sku,
+        shelves: resolvedShelfCount,
+        shelfCount: resolvedShelfCount,
+        shelfSpacing: template.shelfSpacing || 'auto',
+        shelfThickness: resolvedShelfThickness,
+        attachedWallId: placement.attachedWallId,
+        wallSide: placement.wallSide,
+        inwardNormal: placement.inwardNormal,
+        cornerPosition: placement.cornerPosition,
+        isCustom: template.isCustom,
+        baseWidth: template.baseWidth,
+        baseDepth: template.baseDepth,
+        baseHeight: template.baseHeight,
+        scalingMode: template.scalingMode,
+      },
+    };
+
+    updateEntitiesWithHistory([...entitiesRef.current, newRack], 'Add ' + (newRack.properties.productName || newRack.properties.rackType));
+    setSelectedEntityId(newRack.id);
+    setPendingRackPlacement(null);
+    setActiveTool('select');
+  }, [updateEntitiesWithHistory, calculateRackPlacement]);
+
+  const handleSelectRackForPlacement = useCallback((prod: Product3DModelData) => {
+    const template = {
+      rackType: prod.productType || 'Wall Rack',
+      productModelId: prod.productId,
+      productName: prod.productName,
+      sku: prod.sku,
+      width: prod.width,
+      depth: prod.depth,
+      height: prod.height,
+      shelves: prod.shelfCount || 6,
+      shelfCount: prod.shelfCount || 6,
+      shelfThickness: (prod as any)?.shelfThickness || 1.0,
+      shelfSpacing: 'auto' as const,
+      rotation: 0,
+    };
+    setPendingRackPlacement(template);
+    setActiveTool('rack');
+    setShowRackMenu(false);
+    setShowMobileProps(false);
+    setTabletInspectorOpen(false);
+
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      const centerWorld = viewportRef.current.screenToWorld({ x: rect.width / 2, y: rect.height / 2 });
+      setCursorWorldPos(centerWorld);
+    }
+  }, []);
+
+  const handleRotatePendingRack = useCallback(() => {
+    setPendingRackPlacement((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        rotation: (prev.rotation + 90) % 360,
+      };
+    });
+  }, []);
+
+  const handleCancelRackPlacement = useCallback(() => {
+    setPendingRackPlacement(null);
+    setActiveTool('select');
+  }, []);
+
+  const handleQuickPlaceCenter = useCallback(() => {
+    const template = pendingRackPlacementRef.current;
+    if (!template) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const screenCenter = { x: rect.width / 2, y: rect.height / 2 };
+    const worldCenter = viewportRef.current.screenToWorld(screenCenter);
+    const placement = calculateRackPlacement(worldCenter, template);
+    commitNewRackPlacement(placement, template);
+  }, [calculateRackPlacement, commitNewRackPlacement]);
 
 
   // Default parameters
@@ -946,6 +1232,19 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
       showRackDimensions
     );
 
+    let rackPlacementPreview: any = null;
+    if (activeTool === 'rack' && pendingRackPlacementRef.current && cursorWorldPos) {
+      const calc = calculateRackPlacement(cursorWorldPos, pendingRackPlacementRef.current);
+      rackPlacementPreview = {
+        ...calc,
+        width: pendingRackPlacementRef.current.width,
+        depth: pendingRackPlacementRef.current.depth,
+        height: pendingRackPlacementRef.current.height,
+        productName: pendingRackPlacementRef.current.productName,
+        rackType: pendingRackPlacementRef.current.rackType,
+      };
+    }
+
     rendererRef.current.render({
       entities: entitiesRef.current,
       dimensions: showDimensions ? computedDims : [],
@@ -960,11 +1259,12 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
       aiPreviewRacks: aiPreviewRacksRef.current,
       aiPreviewDimensions: aiPreviewDimsRef.current,
       wallToolPreview: wallToolPreviewRef.current,
+      rackPlacementPreview,
       showDebugOverlay,
       dragSelectionRect: dragSelectionRectRef.current,
       measureAnnotations: measureAnnotationsRef.current,
     });
-  }, [selectedEntityId, selectedEntityIds, activeTool, snapIndicator, cursorWorldPos, showGrid, showDimensions, showRackDimensions, showTempRefDimensions, showDebugOverlay]);
+  }, [selectedEntityId, selectedEntityIds, activeTool, snapIndicator, cursorWorldPos, showGrid, showDimensions, showRackDimensions, showTempRefDimensions, showDebugOverlay, pendingRackPlacement, calculateRackPlacement]);
 
 
   const renderSceneRef = useRef(renderScene);
@@ -973,7 +1273,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
   // Consolidated render effect
   useEffect(() => {
     renderScene();
-  }, [renderScene, wallToolPreview, aiPreviewRacks, aiPreviewDimensions, entities, selectedEntityIds, dragSelectionRect, measureAnnotations]);
+  }, [renderScene, wallToolPreview, aiPreviewRacks, aiPreviewDimensions, entities, selectedEntityIds, dragSelectionRect, measureAnnotations, pendingRackPlacement]);
 
 
   // ─── Helper: is a rack entity a Center Rack type? ───
@@ -1167,6 +1467,11 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
   // 7. Mouse & Touch Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Ignore synthetic mouse events generated by touch within 450ms
+    if (Date.now() - lastTouchTimeRef.current < 450) {
+      return;
+    }
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -1671,6 +1976,15 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         }
         break;
       }
+
+      case 'rack': {
+        const template = pendingRackPlacementRef.current;
+        if (template) {
+          const placement = calculateRackPlacement(rawWorldPt, template);
+          commitNewRackPlacement(placement, template);
+        }
+        break;
+      }
     }
   };
 
@@ -1929,6 +2243,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
   // ── Touch Handlers for Pinch-to-Zoom, Two-Finger Pan, and Touch Interaction ──
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    lastTouchTimeRef.current = Date.now();
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -1957,7 +2272,19 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     }
 
     if (e.touches.length === 1) {
+      if (e.cancelable) {
+        e.preventDefault();
+      }
       const t = e.touches[0];
+      const screenPt = { x: t.clientX - rect.left, y: t.clientY - rect.top };
+      touchStartPosRef.current = screenPt;
+
+      if (activeTool === 'rack' && pendingRackPlacementRef.current) {
+        const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
+        setCursorWorldPos(rawWorldPt);
+        return;
+      }
+
       const syntheticMouseEvent = {
         clientX: t.clientX,
         clientY: t.clientY,
@@ -2006,7 +2333,18 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
     }
 
     if (e.touches.length === 1 && !isPinchingRef.current) {
+      if (e.cancelable) {
+        e.preventDefault();
+      }
       const t = e.touches[0];
+      const screenPt = { x: t.clientX - rect.left, y: t.clientY - rect.top };
+
+      if (activeTool === 'rack' && pendingRackPlacementRef.current) {
+        const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
+        setCursorWorldPos(rawWorldPt);
+        return;
+      }
+
       const syntheticMouseEvent = {
         clientX: t.clientX,
         clientY: t.clientY,
@@ -2024,8 +2362,28 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         isPinchingRef.current = false;
         pinchLastDistRef.current = 0;
       }
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       return;
+    }
+
+    if (activeTool === 'rack' && pendingRackPlacementRef.current) {
+      const canvas = canvasRef.current;
+      if (canvas && e.changedTouches.length > 0) {
+        const t = e.changedTouches[0];
+        const rect = canvas.getBoundingClientRect();
+        const screenPt = { x: t.clientX - rect.left, y: t.clientY - rect.top };
+        const dx = screenPt.x - touchStartPosRef.current.x;
+        const dy = screenPt.y - touchStartPosRef.current.y;
+        const moveDist = Math.hypot(dx, dy);
+
+        // If finger moved less than 18px, treat as a deliberate tap to place rack
+        if (moveDist < 18) {
+          const rawWorldPt = viewportRef.current.screenToWorld(screenPt);
+          const placement = calculateRackPlacement(rawWorldPt, pendingRackPlacementRef.current);
+          commitNewRackPlacement(placement, pendingRackPlacementRef.current);
+          return;
+        }
+      }
     }
 
     handleMouseUp();
@@ -2060,6 +2418,17 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         setPlacementModeTool(null);
         setActiveDrawingPoints([]);
         setShowRackMenu(false);
+        return;
+      }
+
+      // R — Rotate pending rack by 90 deg when in rack placement mode, or open rack menu
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        if (activeTool === 'rack' && pendingRackPlacementRef.current) {
+          handleRotatePendingRack();
+        } else {
+          setShowRackMenu(true);
+        }
         return;
       }
       
@@ -2103,6 +2472,10 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         dragSelectionRectRef.current = null;
         setDragSelectionRect(null);
         isDragSelectingRef.current = false;
+        if (activeTool === 'rack') {
+          setPendingRackPlacement(null);
+          setActiveTool('select');
+        }
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
         // Ctrl+A = Select all center racks
@@ -2528,118 +2901,13 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
             <div className="relative shrink-0">
               <button
-                onClick={() => setShowRackMenu(!showRackMenu)}
+                onClick={() => setShowRackMenu(true)}
                 className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-colors"
+                title="Open Rack Catalogue"
               >
                 <ShoppingBag className="w-3.5 h-3.5" />
                 Add Rack ▼
               </button>
-              {showRackMenu && (
-                <div className="fixed md:absolute inset-x-4 top-16 md:inset-x-auto md:left-0 md:top-full mt-2 md:w-72 max-w-sm mx-auto md:mx-0 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col">
-                  <div className="px-3 py-2 bg-slate-900 border-b border-slate-700 text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                    <span>Add Rack</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-retailfix-red-400 font-mono">RetailFix CAD</span>
-                      <button onClick={() => setShowRackMenu(false)} className="text-slate-400 hover:text-white p-0.5">
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* State 1: Loading */}
-                  {productsLoading ? (
-                    <div className="px-4 py-6 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
-                      <div className="w-5 h-5 border-2 border-slate-600 border-t-retailfix-red-500 rounded-full animate-spin" />
-                      <span className="font-medium">Loading rack products...</span>
-                    </div>
-                  ) : productsError ? (
-                    /* State 2: Error */
-                    <div className="px-4 py-5 text-center text-xs text-red-400 flex flex-col items-center gap-2 bg-red-950/20">
-                      <AlertCircle className="w-5 h-5 text-red-400" />
-                      <span className="font-semibold">Unable to load rack products.</span>
-                      <span className="text-[10px] text-slate-400 max-w-[220px] break-words">{productsError}</span>
-                      <button
-                        onClick={() => ProductModelRegistry.loadProducts(true)}
-                        className="mt-1 px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded text-[11px] font-medium flex items-center gap-1 transition-colors"
-                      >
-                        <RefreshCw className="w-3 h-3" /> Retry
-                      </button>
-                    </div>
-                  ) : activeProducts.length === 0 ? (
-                    /* State 3: Empty Product Database */
-                    <div className="px-4 py-6 text-center text-xs text-slate-400 flex flex-col items-center gap-2 bg-slate-900/50">
-                      <PackageX className="w-6 h-6 text-slate-500" />
-                      <span className="font-semibold text-slate-300">No active rack products available.</span>
-                      <span className="text-[11px] text-slate-400">Ask Admin to upload a rack product.</span>
-                      <a
-                        href="/admin/products"
-                        className="mt-1.5 inline-flex items-center gap-1 px-2.5 py-1 bg-retailfix-red-600/20 text-retailfix-red-400 hover:bg-retailfix-red-600/30 rounded text-[11px] font-semibold border border-retailfix-red-500/30 transition-colors"
-                      >
-                        Open Admin Products <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  ) : (
-                    /* State 4: Dynamic Active Products from Admin Catalog */
-                    <div className="max-h-72 overflow-y-auto divide-y divide-slate-700/50">
-                      {activeProducts.map((prod) => (
-                        <button
-                          key={`${prod.productId || prod.id}_${prod.id}`}
-                          onClick={() => {
-                            setShowRackMenu(false);
-                            handleAddRack(
-                              prod.productType || 'Wall Rack',
-                              prod.width,
-                              prod.depth,
-                              prod.height,
-                              prod.productId,
-                              prod.productName
-                            );
-                          }}
-                          className="w-full px-3 py-2.5 text-left text-xs text-slate-200 hover:bg-slate-700 hover:text-white transition-colors flex flex-col group"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-semibold text-white group-hover:text-retailfix-red-400 transition-colors">
-                              {prod.productName}
-                            </span>
-                            {prod.sku && (
-                              <span className="text-[9px] font-mono text-slate-400 bg-slate-800 px-1 py-0.5 rounded border border-slate-700">
-                                {prod.sku}
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[10px] text-slate-400 mt-0.5">
-                            {formatFeetInches(prod.height)} H × {formatFeetInches(prod.width)} W × {formatFeetInches(prod.depth)} D
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Custom Rack Option — Uses Active Admin Product as Base */}
-                  <button
-                    onClick={() => {
-                      setShowRackMenu(false);
-                      setSelectedProductForCustom(activeProducts[0] || null);
-                      setShowCustomRackModal(true);
-                    }}
-                    disabled={activeProducts.length === 0}
-                    className={`px-3 py-2.5 text-left text-xs border-t border-slate-700 font-bold transition-all flex items-center justify-between ${
-                      activeProducts.length === 0
-                        ? 'opacity-40 cursor-not-allowed bg-slate-900 text-slate-500'
-                        : 'bg-slate-900/90 hover:bg-retailfix-red-600/20 text-retailfix-red-400 hover:text-white'
-                    }`}
-                    title={activeProducts.length === 0 ? 'Upload an active product in Admin to create custom racks' : 'Add custom rack based on admin product'}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Sliders className="w-3.5 h-3.5 text-retailfix-red-500" />
-                      <span>Custom Rack</span>
-                    </div>
-                    <span className="text-[10px] bg-retailfix-red-600/30 text-retailfix-red-300 px-1.5 py-0.5 rounded font-mono font-normal">
-                      Custom W×D×H &rarr;
-                    </span>
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* Select All Center Racks button */}
@@ -2811,6 +3079,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
             { tool: 'wall', label: 'Wall (W)', icon: Square },
             { tool: 'partition', label: 'Partition (P)', icon: Layers },
             { tool: 'column', label: 'Column (C)', icon: Box },
+            { tool: 'rack', label: 'Add Rack (R)', icon: ShoppingBag },
             { tool: 'door', label: 'Door (D)', icon: DoorOpen },
             { tool: 'window', label: 'Window (N)', icon: Maximize2 },
             { tool: 'shutter', label: 'Rolling Shutter (S)', icon: Sliders },
@@ -2827,19 +3096,23 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                 <button
                   onClick={() => {
                     if (item.tool === 'rack') {
-                      setShowRackMenu(!showRackMenu);
+                      setShowRackMenu(true);
                       setPlacementModeTool(null);
                     } else if (['door', 'window', 'shutter', 'gate', 'glass_gate', 'column'].includes(item.tool)) {
                       setShowRackMenu(false);
+                      setPendingRackPlacement(null);
                       setActiveTool(item.tool as ToolType);
                       setPlacementModeTool(item.tool as ToolType);
                       setSelectedEntityId(null);
+                      setTabletInspectorOpen(true);
+                      setShowMobileProps(true);
                       setActiveDrawingPoints([]);
                       isDraggingEntityRef.current = false;
                       isMouseDownRef.current = false;
                       setSnapIndicator(null);
                     } else {
                       setShowRackMenu(false);
+                      setPendingRackPlacement(null);
                       setActiveTool(item.tool as ToolType);
                       setPlacementModeTool(null);
                       setWallToolPreview(null);
@@ -2851,7 +3124,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                   }}
                   title={item.tool === 'rack' ? 'Add Rack (R)' : item.label}
                   className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
-                    isActive || (item.tool === 'rack' && showRackMenu)
+                    isActive || (item.tool === 'rack' && (showRackMenu || Boolean(pendingRackPlacement)))
                       ? 'bg-retailfix-red-600 text-white shadow-lg shadow-red-900/40 scale-105'
                       : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                   }`}
@@ -2917,12 +3190,13 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
             {/* 4. Racks Tool */}
             <button
+              id="btn-mobile-dock-racks"
               onClick={() => {
-                setShowRackMenu(!showRackMenu);
+                setShowRackMenu(true);
                 setPlacementModeTool(null);
               }}
               className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-all ${
-                showRackMenu ? 'bg-retailfix-red-600 text-white shadow-lg shadow-red-900/50' : 'text-slate-400 active:bg-slate-800'
+                showRackMenu || (activeTool === 'rack' && Boolean(pendingRackPlacement)) ? 'bg-retailfix-red-600 text-white shadow-lg shadow-red-900/50' : 'text-slate-400 active:bg-slate-800'
               }`}
               title="Add Racks"
             >
@@ -3065,8 +3339,8 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
 
           {/* Floating Multi-Select Rotation Bar (Mobile & Tablet) */}
           {selectedEntityIds.size > 0 && (
-            <div className="absolute bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-md px-3 py-2 rounded-2xl border border-indigo-500/60 shadow-2xl flex items-center gap-2 z-20 max-w-[95vw] overflow-x-auto scrollbar-hide">
-              <span className="text-xs font-bold text-indigo-300 shrink-0 font-mono">
+            <div className="absolute bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-md px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-2xl border border-indigo-500/60 shadow-2xl flex items-center gap-1.5 sm:gap-2 z-20 max-w-[96vw] overflow-x-auto scrollbar-hide">
+              <span className="text-[11px] sm:text-xs font-bold text-indigo-300 shrink-0 font-mono">
                 {selectedEntityIds.size} Selected
               </span>
               <div className="h-4 w-px bg-slate-700 shrink-0" />
@@ -3120,13 +3394,79 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
               {measureAnnotations.length > 0 ? `Clear ${measureAnnotations.length} Measurement${measureAnnotations.length > 1 ? 's' : ''}` : 'No Measurements'}
             </button>
           )}
+
+          {/* Interactive Rack Placement Floating Action Bar */}
+          {activeTool === 'rack' && pendingRackPlacement && (
+            <div className="absolute top-16 md:top-4 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-30 pointer-events-none flex flex-col items-center">
+              <div className="pointer-events-auto bg-slate-900/95 backdrop-blur-md border border-retailfix-red-500/60 rounded-2xl p-2.5 sm:px-4 sm:py-2.5 shadow-2xl shadow-red-950/40 flex flex-wrap items-center justify-between gap-2.5 max-w-lg w-full border-t-2 border-t-retailfix-red-500">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-retailfix-red-600/20 text-retailfix-red-400 border border-retailfix-red-500/30 flex items-center justify-center shrink-0">
+                    <Layers className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-retailfix-red-400 uppercase tracking-wider">Placement Mode</span>
+                      <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-1 py-0.2 rounded">
+                        {pendingRackPlacement.rotation}°
+                      </span>
+                    </div>
+                    <span className="text-xs font-bold text-white block truncate max-w-[170px] sm:max-w-[220px]">
+                      {pendingRackPlacement.productName || pendingRackPlacement.rackType}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Placement Actions */}
+                <div className="flex items-center gap-1.5 ml-auto">
+                  <button
+                    id="btn-rack-placement-rotate"
+                    onClick={handleRotatePendingRack}
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1 border border-slate-700 shadow-sm touch-manipulation transition-colors"
+                    title="Rotate 90 degrees (R)"
+                  >
+                    <RotateCw className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Rotate 90°</span>
+                  </button>
+
+                  <button
+                    id="btn-rack-placement-center"
+                    onClick={handleQuickPlaceCenter}
+                    className="hidden sm:flex px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl text-xs font-semibold items-center gap-1 border border-slate-700 shadow-sm touch-manipulation transition-colors"
+                    title="Place at room center"
+                  >
+                    <Maximize2 className="w-3 h-3 text-cyan-400" />
+                    <span>Center</span>
+                  </button>
+
+                  <button
+                    id="btn-rack-placement-cancel"
+                    onClick={handleCancelRackPlacement}
+                    className="p-1.5 sm:px-2.5 sm:py-1.5 bg-red-950/40 hover:bg-red-900/40 text-red-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1 border border-red-800/40 touch-manipulation transition-colors"
+                    title="Cancel placement (Esc)"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Cancel</span>
+                  </button>
+                </div>
+
+                {/* Instruction banner footer */}
+                <div className="w-full pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
+                  <span className="flex items-center gap-1 text-retailfix-red-300 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-retailfix-red-500 animate-ping inline-block" />
+                    Tap canvas to position rack
+                  </span>
+                  <span>{formatFeetInches(pendingRackPlacement.width)} W × {formatFeetInches(pendingRackPlacement.depth)} D</span>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
 
         {/* ── Properties Inspector: Mobile Bottom Sheet / Tablet Drawer / Desktop Sidebar ── */}
         <aside
           className={`
-            ${showMobileProps && selectedEntity ? 'fixed inset-x-0 bottom-0 max-h-[60vh] bg-retailfix-dark-900 border-t border-slate-700 rounded-t-2xl shadow-2xl z-50 flex flex-col pb-safe' : 'hidden'}
-            ${tabletInspectorOpen ? 'md:fixed md:top-14 md:bottom-8 md:right-0 md:w-72 md:bg-retailfix-dark-900 md:border-l md:border-slate-800 md:z-30 md:shadow-2xl md:flex' : 'md:hidden'}
+            ${(showMobileProps && selectedEntity) || placementModeTool ? 'fixed inset-x-0 bottom-0 max-h-[70vh] bg-retailfix-dark-900 border-t border-slate-700 rounded-t-2xl shadow-2xl z-50 flex flex-col pb-safe' : 'hidden'}
+            ${tabletInspectorOpen || placementModeTool ? 'md:fixed md:top-14 md:bottom-8 md:right-0 md:w-72 md:bg-retailfix-dark-900 md:border-l md:border-slate-800 md:z-30 md:shadow-2xl md:flex' : 'md:hidden'}
             lg:relative lg:top-auto lg:bottom-auto lg:right-auto lg:w-72 lg:border-l lg:border-slate-800 lg:flex lg:flex-col lg:shadow-none
             justify-between shrink-0 overflow-y-auto p-4 space-y-5 text-xs
           `}
@@ -3157,6 +3497,8 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                 onClick={() => {
                   setShowMobileProps(false);
                   setTabletInspectorOpen(false);
+                  setPlacementModeTool(null);
+                  setWallToolPreview(null);
                 }}
                 className="lg:hidden p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
                 title="Close Properties"
@@ -3176,6 +3518,8 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                   setPlacementModeTool(null);
                   setActiveTool('select');
                   setWallToolPreview(null);
+                  setShowMobileProps(false);
+                  setTabletInspectorOpen(false);
                 }}
                 onPreviewChange={setWallToolPreview}
               />
@@ -4201,6 +4545,34 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
         </div>
       </footer>
 
+      {/* Rack Catalogue Modal — Accessible across all screen sizes (Mobile, Tablet, Desktop) */}
+      {showRackMenu && (
+        <RackCatalogueModal
+          isOpen={showRackMenu}
+          onClose={() => setShowRackMenu(false)}
+          onSelectRack={handleSelectRackForPlacement}
+          onQuickAddRack={(prod) => {
+            handleAddRack(
+              prod.productType || 'Wall Rack',
+              prod.width,
+              prod.depth,
+              prod.height,
+              prod.productId,
+              prod.productName
+            );
+          }}
+          onOpenCustomRackModal={() => {
+            setShowRackMenu(false);
+            setSelectedProductForCustom((activeProducts || [])[0] || null);
+            setShowCustomRackModal(true);
+          }}
+          products={activeProducts}
+          isLoading={productsLoading}
+          error={productsError}
+          onRetry={() => ProductModelRegistry.loadProducts(true)}
+        />
+      )}
+
       {/* Custom Rack Modal */}
       {showCustomRackModal && (
         <CustomRackModal
@@ -4292,6 +4664,7 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
             <div className="grid grid-cols-3 gap-2.5">
               {[
                 { tool: 'wall', label: 'Wall', icon: Square },
+                { tool: 'rack', label: 'Racks', icon: ShoppingBag },
                 { tool: 'partition', label: 'Partition', icon: Layers },
                 { tool: 'column', label: 'Column', icon: Box },
                 { tool: 'door', label: 'Door', icon: DoorOpen },
@@ -4309,9 +4682,16 @@ export const CADEditor: React.FC<CADEditorProps> = ({ projectId, surveyToken, is
                     key={item.tool}
                     onClick={() => {
                       setShowMobileMoreTools(false);
+                      if (item.tool === 'rack') {
+                        setShowRackMenu(true);
+                        setPlacementModeTool(null);
+                        return;
+                      }
                       setActiveTool(item.tool as ToolType);
                       if (['door', 'window', 'shutter', 'gate', 'glass_gate', 'column'].includes(item.tool)) {
                         setPlacementModeTool(item.tool as ToolType);
+                        setShowMobileProps(true);
+                        setTabletInspectorOpen(true);
                       } else {
                         setPlacementModeTool(null);
                       }
